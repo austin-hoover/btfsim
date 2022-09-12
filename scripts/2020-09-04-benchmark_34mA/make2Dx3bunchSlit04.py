@@ -1,7 +1,8 @@
-import numpy as np
 import sys
-sys.path.append('/mnt/c/Users/k0r/soft/btf-pyorbit-simulation/')
-sys.path.append('/media/sf_OracleShared/soft/btf-pyorbit-simulation/')
+import os
+import numpy as np
+
+sys.path.insert(1, os.getcwd())
 import btfsim.sim.simulation_main as main
 import btfsim.bunch.bunchUtilities as butil
 
@@ -9,22 +10,24 @@ import btfsim.bunch.bunchUtilities as butil
 ## Files
 ####################################################################################
 
-emitdir = 'emittance-files/'
 
 # 1st emit, 35 mA, Snapshot_20200831_155501.mstate
-xfile = emitdir + 'emittance-data-x-20200902-1599057774224.csv'
-yfile = emitdir + 'emittance-data-y-20200902-1599060458388.csv'
-zfile = emitdir + 'BSM-2d_02-Sep-2020_16_08_27-emittance-z-dE.csv' # core
+xfile = 'data/emittance/2020-09-02/emittance-data-x-20200902-1599057774224.csv'
+yfile = 'data/emittance/2020-09-02/emittance-data-y-20200902-1599060458388.csv'
+zfile = 'data/emittance/2020-08-27/BSM-2d_02-Sep-2020_16_08_27-emittance-z-dE.csv' # core
 threshold = 0.01
 
-out_bunch_filename = '2Dx3_200902_HZ04_34mA_10M'
+suffix = '200K'
+out_bunch_filename = 'data/bunch/2Dx3_200902_HZ04_34mA_{}'.format(suffix)
+
+
 ####################################################################################
 ## Set-up parameters
 ####################################################################################
 
-beam_current = 0.034
-bunch_frequency= 402.5e6
-nParticles = 10e6
+beam_current = 0.034  # [A]
+bunch_frequency= 402.5e6  # [Hz]
+nParticles = 0.2e6
 
 ekin = 0.0025 # in [GeV]
 mass = 0.939294 # in [GeV]
@@ -51,33 +54,30 @@ twissz = bcalc.Twiss(plane='z')
 print(twissz)
 
 
+# # -- propagate via simulation
+# mstatefile = 'data/lattice/Snapshot_20200831_155501.mstate'
+
+# # -- init default lattice w/ mstate solution
+# sim.initLattice(beamline=["MEBT1","MEBT2","MEBT3"], mstatename=mstatefile)
 
 
+# # -- set up apertures
+# sim.initApertures(d=0.04)
 
-# -- propagate via simulation
-mstatefile = '/home/kruisard/Dropbox/Data/mstates/Snapshot_20200831_155501.mstate'
-
-# -- init default lattice w/ mstate solution
-sim.initLattice(beamline=["MEBT1","MEBT2","MEBT3"],mstatename=mstatefile)
-
-
-# -- set up apertures
-sim.initApertures(d=0.04)
-
-# -- set up SC nodes
-sclen = 0.001
-sim.initSCnodes(minlen = sclen, solver='fft',gridmult=6)
+# # -- set up SC nodes
+# sclen = 0.001
+# sim.initSCnodes(minlen = sclen, solver='fft', gridmult=6)
 
 
-## -- first run backwards to RFQ exit.
-out_bunch_name= out_bunch_filename.replace('HZ04','RFQ0')
-start = 0.
-stop = "MEBT:HZ04"
-sim.reverse(start=start, stop=stop, out = out_bunch_name)
+# # Run backwards to RFQ exit.
+# out_bunch_name= out_bunch_filename.replace('HZ04', 'RFQ0')
+# start = 0.
+# stop = "MEBT:HZ04"
+# sim.reverse(start=start, stop=stop, out=out_bunch_name)
 
-# -- save output
-hist_out_name = 'data/btf_hist_toRFQ_10M.txt'
-sim.tracker.writehist(filename=hist_out_name)
+# # -- save output
+# hist_out_name = 'data/bunch/btf_hist_toRFQ_{}.txt'.format(suffix)
+# sim.tracker.writehist(filename=hist_out_name)
 
 # -- run forwards to VS06
 #out_bunch_name= '2Dx3_190326_190724_FC12_26mA_200k'

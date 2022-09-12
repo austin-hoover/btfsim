@@ -24,9 +24,9 @@ stop = 'VT34a'
 #mstatefile = '/home/kruisard/Dropbox/Data/mstates/Snapshot_20200715_194120.mstate'
 # -- 8/31 empirical
 mstatefile = 'data/lattice/Snapshot_20200831_155501.mstate'
-bunchfilename = 'data/bunches/2Dx3_200902_HZ04_34mA_200k.dat'
+bunchfilename = 'data/bunch/2Dx3_200902_HZ04_34mA_200k.dat'
 
-irun = 200
+irun = 0
 runname = Path(__file__).stem
 bunchout = '{}_{}_{}_bunch_{}.txt'.format(runname, start, stop, irun)
 hist_out_name = 'data/_output/{}_{}_{}_hist_{}.txt'.format(runname, start, stop, irun)
@@ -40,13 +40,13 @@ dispersionFlag = 0  # if 1, dispersion corrected for in Twiss calculation
 nPMQs = 19
 
 sclen = 0.01 # [meters]
-gridmult= 6
+gridmult = 6
 n_bunches = 3 # number of bunches to model
 
-x0 = 0. # mm
-y0 = 0.  # 6.17 mm
-xp0 = 0. # mrad
-yp0 = 0.  # -2.2
+x0 = 0.0  # [mm]
+y0 = 0.0  # [mm]
+xp0 = 0. # [mrad]
+yp0 = 0. # [mrad] 
 dE0 = 0. # Mev
 
 
@@ -78,16 +78,18 @@ sim.initLattice(beamline=["MEBT1", "MEBT2", "MEBT3"], mstatename=mstatefile)
 # -- replace quads with analytic model (must come after lattice init but before SC nodes)
 quad_names = [] # leaving this empty will change all quads in sequence(s)
 for j in range(nPMQs):
-    qname = 'MEBT:FQ%02.0f'%(j+1)
+    qname = 'MEBT:FQ%02.0f'%(j + 1 + 13)
     quad_names.append(qname)
 
 z_step = 0.001
 if replace_quads == 1:
-    Replace_Quads_to_OverlappingQuads_Nodes(sim.accLattice,\
-                                            z_step, \
-                                            accSeq_Names = ["MEBT3"], \
-                                            quad_Names = quad_names, \
-                                            EngeFunctionFactory = quadfunc)
+    Replace_Quads_to_OverlappingQuads_Nodes(
+        sim.accLattice,
+        z_step, 
+        accSeq_Names=["MEBT3"], 
+        quad_Names=quad_names, 
+        EngeFunctionFactory=quadfunc,
+    )
 
 
 
@@ -96,9 +98,7 @@ sim.initSCnodes(minlen=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunch
 
 # -- load initial bunch into sims[0]
 sim.initBunch(gen="load", file=bunchfilename) 
-sim.decimateBunch(4)#5.301)
-#sim.attenuateBunch(34./41.)
-sim.shiftBunch(x0=x0*1e-3,y0=y0*1e-3,xp0=xp0*1e-3,yp0=yp0*1e-3)
+sim.shiftBunch(x0=x0*1e-3, y0=y0*1e-3, xp0=xp0*1e-3, yp0=yp0*1e-3)
 
 ###############################################################################
 # -- Run, track bunch
@@ -113,6 +113,5 @@ else:
     stoparg = stop
 
 # -- run  
-#sim.run(start=startarg, stop=stoparg, out=bunchout)
-sim.run(start=startarg, out=bunchout)
+sim.run(start=startarg, stop=stoparg, out=bunchout)
 sim.tracker.writehist(filename=hist_out_name)
