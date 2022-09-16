@@ -11,24 +11,27 @@ import inspect
 import numpy as np
 import btfsim.util.Utilities as util
 
-class getDefaults():
 
+class getDefaults:
     def __init__(self):
         self.defaultdict = {}
         self.readDefaults()
         self.homedir = self.defaultdict["HOMEDIR"]
-        self.outdir =  self.defaultdict["HOMEDIR"] + self.defaultdict["OUTDIR"]
+        self.outdir = self.defaultdict["HOMEDIR"] + self.defaultdict["OUTDIR"]
         self.magnetdir = self.defaultdict["HOMEDIR"] + self.defaultdict["MAGNETDIR"]
-        self.bunchdir = self.defaultdict["HOMEDIR"]  + self.defaultdict["BUNCHDIR"] 
-        self.latticedir = self.defaultdict["HOMEDIR"]  + self.defaultdict["LATTICEDIR"] 
+        self.bunchdir = self.defaultdict["HOMEDIR"] + self.defaultdict["BUNCHDIR"]
+        self.latticedir = self.defaultdict["HOMEDIR"] + self.defaultdict["LATTICEDIR"]
 
     def readDefaults(self):
         # Reads and interprets default file, which lists locations of files that define default setpoints/bunches
-        simdir = os.path.dirname(os.path.dirname(os.path.dirname(inspect.getfile(util)))) + '/'
+        simdir = (
+            os.path.dirname(os.path.dirname(os.path.dirname(inspect.getfile(util))))
+            + "/"
+        )
         if len(simdir) > 1:
-            defaultfilename = simdir+'data/default_settings.csv'
+            defaultfilename = simdir + "data/default_settings.csv"
         else:
-            simdir = './'
-            defaultfilename = 'data/default_settings.csv'
+            simdir = "./"
+            defaultfilename = "data/default_settings.csv"
         self.defaultdict = util.file2dict(defaultfilename)
-        self.defaultdict["HOMEDIR"] = simdir 
+        self.defaultdict["HOMEDIR"] = simdir

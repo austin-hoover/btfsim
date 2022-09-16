@@ -41,20 +41,20 @@ class Base_BunchGenerator(object):
         self.beam_current = curr # beam current in mA 
         self.bunch_frequency = freq # RF frequency in Hz
 
-    def getKinEnergy(self):
+    def get_kin_energy(self):
         """
         Returns the kinetic energy in GeV
         """
         return self.bunch.getSyncParticle().kinEnergy()
 
-    def setKinEnergy(self, e_kin = 0.0025):
+    def set_kin_energy(self, e_kin = 0.0025):
         """
         Sets the kinetic energy in GeV
         """
         self.bunch.getSyncParticle().kinEnergy(e_kin)
         self.beta = self.bunch.getSyncParticle().beta()
 
-    def getZtoPhaseCoeff(self):
+    def get_z_to_phase_coeff(self):
         """
         Returns the coefficient to calculate phase in degrees from the z-coordinate.
         """
@@ -64,31 +64,31 @@ class Base_BunchGenerator(object):
 
         return phase_coeff
 
-    def getBeamCurrent(self):
+    def get_beam_current(self):
         """
         Returns the beam currect in mA
         """
         return self.beam_current
 
-    def setBeamCurrent(self, current):
+    def set_beam_current(self, current):
         """
         Sets  the beam currect in mA
         """
         self.beam_current = current
 
-    def calcMacroSize(self,bunch):
+    def calc_macro_size(self,bunch):
         macrosize = (self.beam_current*1.0e-3/self.bunch_frequency)
         macrosize /= (math.fabs(bunch.charge())*consts.charge_electron)
         macrosize /=bunch.getSizeGlobal()
         return macrosize
 
-    def getBunch(self,filename):
+    def get_bunch(self,filename):
         bunch = Bunch()
         self.bunch.copyEmptyBunchTo(bunch)
         bunch.readBunch(filename)
         return bunch
 
-    def dumpBunch(self, **kwargs):
+    def dump_bunch(self, **kwargs):
         """
         dump bunch to coordinates file
 
@@ -96,12 +96,11 @@ class Base_BunchGenerator(object):
         bunch = bunch instance
         filename = name to send output, default "./GeneratedInputBunch.txt"
         """
-        bunch = kwargs.get('bunch',self.bunch)
-        fileName = kwargs.get('filename',"GeneratedInputBunch.txt")
-
+        bunch = kwargs.get('bunch', self.bunch)
+        fileName = kwargs.get('filename', "GeneratedInputBunch.txt")
         bunch.dumpBunch(fileName)
 
-    def readParmteqBunch(self,filename):
+    def read_parmteq_bunch(self, filename):
         """
         Reads bunch with expected header format: 
 
@@ -140,8 +139,8 @@ class Base_BunchGenerator(object):
 
         # -- change bunch attributes based on input distribution
         self.bunch_frequency = freq*1e6
-        self.setKinEnergy(e_kin = e_kin*1e-3)
-        phase_coeff = self.getZtoPhaseCoeff()
+        self.set_kin_energy(e_kin = e_kin*1e-3)
+        phase_coeff = self.get_z_to_phase_coeff()
         z = np.rad2deg(phi)/phase_coeff
 
         # -- add particles to bunch
@@ -149,16 +148,13 @@ class Base_BunchGenerator(object):
             bunch.addParticle(x[i],xp[i],y[i],yp[i],z[i],de[i])
 
         # assign current
-        self.setBeamCurrent(current)
-        macrosize = self.calcMacroSize(bunch)
+        self.set_beam_current(current)
+        macrosize = self.calc_macro_size(bunch)
         bunch.macroSize(macrosize)
 
         return bunch
 
-
-
-
-    def dumpParmilaFile(self, **kwargs):
+    def dump_parmila_file(self, **kwargs):
         """
         Dump the Parmila bunch into the file
 
@@ -199,8 +195,7 @@ class Base_BunchGenerator(object):
             parmila_out.write("%18.11g%18.11g%18.11g%18.11g%18.11g%18.11g \n"%(x,xp,y,yp,phi,kinE))
         parmila_out.close()
 
-
-    def centerBunch(self,bunch):
+    def center_bunch(self,bunch):
         """
         Calculate bunch means and shift to center on 0
         """
@@ -255,7 +250,7 @@ class BTF_Linac_BunchGenerator(Base_BunchGenerator):
         self.twiss = (twissX, twissY, twissZ)
         super(BTF_Linac_BunchGenerator,self).__init__(mass=mass,charge=charge,ekin=ekin,curr=curr,freq=freq)
 
-    def getBunch(self, nParticles = 0, distributorClass = WaterBagDist3D, cut_off = -1.):
+    def get_bunch(self, nParticles = 0, distributorClass = WaterBagDist3D, cut_off = -1.):
         """
         Returns the pyORBIT bunch with particular number of particles.
         """
@@ -312,7 +307,7 @@ class BTF_Linac_TrPhaseSpace_BunchGenerator(Base_BunchGenerator):
         self.method = method
         super(BTF_Linac_TrPhaseSpace_BunchGenerator,self).__init__(mass=mass,charge=charge,ekin=ekin,curr=curr,freq=freq)
 
-    def getBunch(self, nParticles = 0, distributorClass = WaterBagDist1D, cut_off = -1.):
+    def get_bunch(self, nParticles = 0, distributorClass = WaterBagDist1D, cut_off = -1.):
         """
         Returns the pyORBIT bunch with particular number of particles.
 
@@ -341,19 +336,19 @@ class BTF_Linac_TrPhaseSpace_BunchGenerator(Base_BunchGenerator):
         if self.method == 'cdf':
             for i in range(nParticles):
                 (z,dE) = distributor.getCoordinates()
-                (x,xp) = self.phaseSpGenX.getX_XP()
-                (y,yp) = self.phaseSpGenY.getY_YP()
+                (x,xp) = self.phaseSpGenX.get_x_xp()
+                (y,yp) = self.phaseSpGenY.get_y_yp()
                 (x,xp,y,yp,z,dE) = orbit_mpi.MPI_Bcast((x,xp,y,yp,z,dE),data_type,main_rank,comm)
                 if(i%size == rank):
                     bunch.addParticle(x,xp,y,yp,z,dE)					
         # -- deposit particles according to Grid-based method
         elif self.method == 'grid':
             # -- create pdf's for x and y distributions
-            self.phaseSpGenX.genPDF()
-            self.phaseSpGenY.genPDF()
+            self.phaseSpGenX.gen_pdf()
+            self.phaseSpGenY.gen_pdf()
             # -- sample distributions
-            (xcoord,xpcoord) = self.phaseSpGenX.gridSample(nParticles=nParticles)
-            (ycoord,ypcoord) = self.phaseSpGenY.gridSample(nParticles=nParticles)			
+            (xcoord,xpcoord) = self.phaseSpGenX.grid_sample(nParticles=nParticles)
+            (ycoord,ypcoord) = self.phaseSpGenY.grid_sample(nParticles=nParticles)			
             # -- add particles to bunch
             nParticles = min([len(xcoord),len(ycoord)]) # this is necessary because grid method does not return exact nParticles
             for i in range(nParticles):
@@ -395,7 +390,7 @@ class BTF_Linac_6DPhaseSpace_BunchGenerator(Base_BunchGenerator):
         self.method = method
         super(BTF_Linac_6DPhaseSpace_BunchGenerator,self).__init__(mass=mass,charge=charge,ekin=ekin,curr=curr,freq=freq)
 
-    def getBunch(self, nParticles = 0, **kwargs):
+    def get_bunch(self, nParticles = 0, **kwargs):
         """
         Returns the pyORBIT bunch with particular number of particles.
 
@@ -418,22 +413,22 @@ class BTF_Linac_6DPhaseSpace_BunchGenerator(Base_BunchGenerator):
         # -- deposit particles according to CDF method 
         if self.method == 'cdf':
             for i in range(nParticles):
-                (z,dE) = self.phaseSpGenZ.getZ_ZP()
-                (x,xp) = self.phaseSpGenX.getX_XP()
-                (y,yp) = self.phaseSpGenY.getY_YP()
+                (z,dE) = self.phaseSpGenZ.get_z_zp()
+                (x,xp) = self.phaseSpGenX.get_x_xp()
+                (y,yp) = self.phaseSpGenY.get_y_yp()
                 (x,xp,y,yp,z,dE) = orbit_mpi.MPI_Bcast((x,xp,y,yp,z,dE),data_type,main_rank,comm)
                 if(i%size == rank):
                     bunch.addParticle(x,xp,y,yp,z,dE)					
         # -- deposit particles according to Grid-based method
         elif self.method == 'grid':
             # -- create pdf's for x and y distributions
-            self.phaseSpGenZ.genPDF()
-            self.phaseSpGenX.genPDF()
-            self.phaseSpGenY.genPDF()
+            self.phaseSpGenZ.gen_pdf()
+            self.phaseSpGenX.gen_pdf()
+            self.phaseSpGenY.gen_pdf()
             # -- sample distributions
-            (zcoord,zpcoord) = self.phaseSpGenZ.gridSample(nParticles=nParticles)
-            (xcoord,xpcoord) = self.phaseSpGenX.gridSample(nParticles=nParticles)
-            (ycoord,ypcoord) = self.phaseSpGenY.gridSample(nParticles=nParticles)			
+            (zcoord,zpcoord) = self.phaseSpGenZ.grid_sample(nParticles=nParticles)
+            (xcoord,xpcoord) = self.phaseSpGenX.grid_sample(nParticles=nParticles)
+            (ycoord,ypcoord) = self.phaseSpGenY.grid_sample(nParticles=nParticles)			
             # -- add particles to bunch
             nParticles = min([len(xcoord),len(ycoord),len(zcoord)]) # this is necessary because grid method does not return exact nParticles
             for i in range(nParticles):
@@ -465,7 +460,7 @@ class PhaseSpaceGen:
     ...
     xp_nxp val_nxp_1 val_nxp_2  ... val_nxp_nx
     """
-    def __init__(self,file_name, x_max = 1.0e+36, xp_max = 1.0e+36, threshold=3e-4):
+    def __init__(self, file_name, x_max = 1.0e+36, xp_max = 1.0e+36, threshold=3e-4):
 
         # -- initialize variables that are defined/used in sub-functions
         self.pdf = []
@@ -552,7 +547,7 @@ class PhaseSpaceGen:
     # ------------------------------------------------------------------------------------------------------------
     # -- functions for method = cdf (default)
 
-    def getX(self):
+    def get_x(self):
         g = random.random()
         ind_x_0 = 0
         ind_x_1 = self.nx - 1
@@ -580,7 +575,7 @@ class PhaseSpaceGen:
         x = self.x_min + (ind_x_0 + coeff)*self.x_step 
         return (x,coeff,ind_x_0,ind_x_1)
 
-    def getXP(self,coeff,ind_x_0,ind_x_1):
+    def get_xp(self,coeff,ind_x_0,ind_x_1):
         g = random.random()
         ind_x = ind_x_0
         if(g > coeff): ind_x = ind_x_1
@@ -625,12 +620,12 @@ class PhaseSpaceGen:
         xp = self.xp_min + (ind_xp_0 + coeff)*self.xp_step 
         return xp
 
-    def getX_XP(self):
+    def get_x_xp(self):
         count_max = 1000
         count = 0		
         while(-1 < 0):
-            (x,coeff,ind_x_0,ind_x_1) = self.getX()
-            xp = self.getXP(coeff,ind_x_0,ind_x_1)
+            (x,coeff,ind_x_0,ind_x_1) = self.get_x()
+            xp = self.get_xp(coeff,ind_x_0,ind_x_1)
 
             if(abs(x) < self.x_max_gen and abs(xp) < self.xp_max_gen):
                 # -- add in linear correlation
@@ -643,22 +638,22 @@ class PhaseSpaceGen:
                 print "debug self.x_max_gen =",self.x_max_gen," self.xp_max_gen =",self.xp_max_gen
                 sys.exit(1)		
 
-    def getY_YP(self):
-        return self.getX_XP()
+    def get_y_yp(self):
+        return self.get_x_xp()
 
-    def getZ_ZP(self):
-        return self.getX_XP()
+    def get_z_zp(self):
+        return self.get_x_xp()
 
 
     # ------------------------------------------------------------------------------------------------------------
     # -- functions for method = grid
 
-    def genPDF(self):
+    def gen_pdf(self):
         # create 2D numpy array out of 2D grid object;	
         #(just normalizes scan data)
         self.pdf = self.val_matrix/self.val_matrix.sum()
 
-    def gridSample(self,nParticles=0): 
+    def grid_sample(self,nParticles=0): 
         # make number density array out of PDF grid
         # returns arrays of x and x' coordinates
         #
@@ -747,7 +742,7 @@ class PhaseSpaceGenZPartial:
             self.distributor = zdistributor(twissZ, cut_off)
 
 
-    def getZ_ZP(self):
+    def get_z_zp(self):
         """
         Sample from z, dE distribution
         """
@@ -756,11 +751,11 @@ class PhaseSpaceGenZPartial:
         dE = self.invcdf(ind01)
         return (z,dE)
 
-    def genPDF(self):
-        print("Method 'genPDF' not enabled")
+    def gen_pdf(self):
+        print("Method 'gen_pdf' not enabled")
 
-    def gridSample(self,nParticles=0):
-        print("Method 'gridSample' not enabled")
+    def grid_sample(self,nParticles=0):
+        print("Method 'grid_sample' not enabled")
         return (0,0)	
 
     
@@ -773,10 +768,10 @@ class DumpBunchAccNode(BaseLinacNode):
         self.file_name = file_name
         self.skip = False
 
-    def setSkip(self,skip):
+    def set_skip(self,skip):
         self.skip = skip
 
-    def setFileName(self,file_name):
+    def set_file_name(self,file_name):
         self.file_name = file_name
 
     def track(self, paramsDict):
@@ -785,10 +780,10 @@ class DumpBunchAccNode(BaseLinacNode):
         """
         if(self.skip): return
         bunch = paramsDict["bunch"]
-        DumpBunchCoordinates(self.file_name, bunch)
+        dump_bunch_coordinates(self.file_name, bunch)
 
 
-def DumpBunchCoordinates(file_name, bunch):
+def dump_bunch_coordinates(file_name, bunch):
     fl_out = None
     comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
     rank = orbit_mpi.MPI_Comm_rank(comm)
@@ -812,7 +807,7 @@ def DumpBunchCoordinates(file_name, bunch):
     if(rank == 0):
         fl_out.close()
 
-def BunchTransformerFunc(bunch):
+def bunch_transformer_func(bunch):
     """ 
     This function will reverse all xp, yp, z coordinates of the bunch.
     We have to change the sign of the z because the tail will be the head
@@ -827,7 +822,7 @@ def BunchTransformerFunc(bunch):
         #--- dE should not change the sign
         #bunch.dE(i,-dE)
 
-def ReverseBunchCoordinate(bunch,axis_ind):
+def reverse_bunch_coordinate(bunch,axis_ind):
     """ 
     This function will reverse a particular coordinate of the bunch
     axis_ind = 0 - x-coord
@@ -846,45 +841,3 @@ def ReverseBunchCoordinate(bunch,axis_ind):
         if(axis_ind == 3): bunch.yp(i,-yp)
         if(axis_ind == 4): bunch.z(i,-z)
         if(axis_ind == 5): bunch.dE(i,-dE)
-
-def plotBunch(bunch, axis_ind, str_title = ""):
-    nParts = bunch.getSize()
-    p_arr = [0.,]
-    pp_arr = [0.,]
-    str_xlabel = ""
-    str_ylabel = ""
-    if(axis_ind == 0): 
-        if(str_title == ""): str_title = "Horizontal Plane"
-        str_xlabel = 'set xlabel "x, mm"'
-        str_ylabel = 'set ylabel "xp, mrad"'
-    if(axis_ind == 1): 
-        if(str_title == ""): str_title = "Vertical Plane"
-        str_xlabel = 'set xlabel "y, mm"'
-        str_ylabel = 'set ylabel "yp, mrad"'
-    if(axis_ind == 2): 
-        if(str_title == ""): str_title = "Longitudinal Plane"
-        str_xlabel = 'set xlabel "z, mm"'
-        str_ylabel = 'set ylabel "dE, MeV"'		
-    for i in range(nParts):
-        arr = [bunch.x(i),bunch.xp(i),bunch.y(i),bunch.yp(i),bunch.z(i),bunch.dE(i)]
-        p = arr[axis_ind*2]
-        pp = arr[axis_ind*2+1]		
-        p_arr.append(p*1000.)
-        pp_arr.append(pp*1000.)
-
-    import Gnuplot
-
-    data = Gnuplot.Data(p_arr,pp_arr,with_='p 19', title='core')
-
-    gp = Gnuplot.Gnuplot(persist = 1)
-    gp('set grid')
-    gp('set key left')
-    gp.title(str_title)
-    gp(str_xlabel)
-    gp(str_ylabel)
-    #gp('set pointsize 1.5')
-    gp.plot(data)
-    #raw_input('Please press return to stop:\n')
-    return gp
-
-
