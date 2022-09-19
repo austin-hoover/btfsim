@@ -16,14 +16,14 @@ import btfsim.sim.simulation_main as main
 # ------------------------------------------------------------------------------
 start = 0  # start node (name or index)
 stop = 'HZ04'  # stop node (name or index)
-run_index = 0  
 
 # File paths
 script_name = Path(__file__).stem
 datestamp = time.strftime('%Y-%m-%d')
 timestamp = time.strftime('%y%m%d%H%M%S')
 outdir = os.path.join('data/_output/', datestamp)
-os.makedirs(outdir)
+if not os.path.isdir(outdir):
+    os.makedirs(outdir)
 
 fio = dict()
 fio['in'] = dict()
@@ -37,13 +37,14 @@ nPMQs = 19  # number of permanent-magnet quadrupoles
 
 # Bunch
 fio['in']['bunch'] = 'data/bunch/realisticLEBT_50mA_42mA_8555k.dat'
-bunch_dec_factor = 2.0  # decrease number of particles by this power of 10
+bunch_dec_factor = None  # decrease number of particles by this power of 10
 x0 = 0.0  # [m]
 y0 = 0.0  # [m]
 xp0 = 0.0  # [rad]
 yp0 = 0.0  # [rad]
 beam_current = 26.0  # current to use in simulation [mA]
-beam_current_input = 42.0  # current of input bunch [mA]
+beam_current_input = 42.0  # current specified in input bunch file [mA]
+                           # (should we read this automatically?)
 
 # Space charge
 sclen = 0.01  # [m]
