@@ -1,7 +1,7 @@
 """Module to generate BTF lattice based on XML file.
 
-By default, loads lattice defined in defaults file:
-'btf-pyorbit-2/data/lattice/BTF_lattice.xml'
+By default, loads lattice defined in defaults file: 
+'/data/lattice/BTF_lattice.xml'
 
 Optional keyword arguments:
 filename = 'path/to/xml/file.xml'
@@ -11,15 +11,18 @@ Usage:
 >>> import btfsim.lattice.genLattice as gl
 >>> lat = gl.genLattice()
 >>> lat.updateQuads(QH01=10)
+
 lattice definition stored in lat.accLattice
 quad params accessible in lat.quaddict
-
-K. Ruisard 2019
 """
+import sys
+import os
 from collections import OrderedDict
+
 from orbit.py_linac.linac_parsers import SNS_LinacLatticeFactory
 from orbit.py_linac.lattice.LinacApertureNodes import LinacApertureNode
-import btfsim.util.defaults as default
+
+from btfsim.util.default import Default
 import btfsim.util.utils as utils
 import btfsim.lattice.utils as mutils
 
@@ -42,10 +45,9 @@ class GenLattice(mutils.magConvert):
 
     def __init__(self, **kwargs):
         # -- get default lattice file
-        defaults = default.getDefaults()
-        defaultlatticeFileName = (
-            defaults.defaultdict["HOMEDIR"] + defaults.defaultdict["XML_FILE"]
-        )
+        default = Default()
+        defaultlatticeFileName = os.path.join(
+            default.defaultdict["HOMEDIR"], default.defaultdict["XML_FILE"])
 
         # -- parse args
         self.filename = kwargs.get("xml", defaultlatticeFileName)
@@ -194,14 +196,10 @@ class GenLattice(mutils.magConvert):
                 print("Element %s is not in beamline" % (elementname))
 
     def defaultQuads(self):
-        """
-        Loads info stored in default quad settings file
-
-        """
+        """Load info stored in default quad settings file."""
         key = "QUAD_SET"
-
-        defaults = default.getDefaults()
-        filename = defaults.homedir + defaults.defaultdict[key]
+        default = Default()
+        filename = os.path.join(default.homedir, default.defaultdict[key])
         spdict = util.file2dict(filename)
         self.updateQuads(dict=spdict)
 

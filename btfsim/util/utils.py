@@ -3,7 +3,7 @@ import os
 from collections import OrderedDict
 
 
-def file2dict(filename):
+def file_to_dict(filename):
     """Writes text file with two columns to dictionary."""
     filestring = open(filename, "U").read().split("\n")
     thisdict = OrderedDict()

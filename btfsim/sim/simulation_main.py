@@ -20,7 +20,7 @@ import orbit.utils.consts as consts
 import btfsim.bunch.btf_linac_bunch_generator as gen_bunch
 import btfsim.bunch.utils as butils
 import btfsim.lattice.generate_btf_lattice as gen_lattice
-import btfsim.util.defaults as default
+from btfsim.util.default import Default
 
 
 class simBTF:
@@ -55,29 +55,23 @@ class simBTF:
     init_bunch
     change_quads
     """
-    def __init__(self, outdir=[]):
-        # -- some default parameters
-        self.ekin = 0.0025  # in [GeV]
-        self.mass = 0.939294  # in [GeV]
-        self.charge = -1  # particle charge
+    def __init__(self, outdir=None):
+        self.ekin = 0.0025  # [GeV]
+        self.mass = 0.939294  # [GeV]
+        self.charge = -1.0  # elementary charge units
         self.gamma = (self.mass + self.ekin) / self.mass
         self.beta = np.sqrt(self.gamma * self.gamma - 1.0) / self.gamma
-        print("relat. gamma=", self.gamma)
-        print("relat.  beta=", self.beta)
         self.freq = 402.5e6
+        print("relativistic. gamma =", self.gamma)
+        print("relativistic  beta =", self.beta)
 
-        # -- initialize default file locations
-        self.defaults = default.getDefaults()
-
-        # -- default save location will be <cwd>/data/ unless specified
-        if outdir:
-            self.outdir = outdir
-        else:
-            self.outdir = os.getcwd() + "/data/"
-        if not (os.path.exists(self.outdir)):  # -- make directory if not there yet
+        self.default = Default()
+        self.outdir = outdir
+        if self.outdir is None:
+            self.outdir = os.path.join(os.getcwd(), '/data')
+        if not os.path.exists(self.outdir):  # -- make directory if not there yet
             os.mkdir(self.outdir)
 
-        # -- set flags
         self.movie_flag = 0  
         self.dispersion_flag = 1
         self.emit_norm_flag = 0
@@ -184,7 +178,7 @@ class simBTF:
         # Wrap up.
         time_exec = time.clock() - time_start
         print("time[sec]=", time_exec)
-        if out:
+        if out is not None:
             self.bunch_track.dumpBunch(output_filename)
             print("Dumped output bunch to file {}".format(output_filename))
         self.tracker.cleanup()
@@ -277,7 +271,7 @@ class simBTF:
                 xml=xml, beamline=beamline, ds=ds, coeffilename=coeffilename
             )
         else:  # -- load lattice in default xml file
-            xml = os.path.join(self.defaults.homedir, self.defaults.defaultdict["XML_FILE"])
+            xml = os.path.join(self.default.home, self.default.defaultdict["XML_FILE"])
             self.lat = gen_lattice.GenLattice(
                 xml=xml, beamline=beamline, ds=ds, coeffilename=coeffilename
             )
@@ -514,7 +508,7 @@ class simBTF:
 
         # Load bunch through file.
         if bunchgenerator == "load":
-            defaultbunchfilename = (self.defaults.homedir + self.defaults.defaultdict["BUNCH_IN"])
+            defaultbunchfilename = (self.default.home + self.default.defaultdict["BUNCH_IN"])
             bunchfilename = kwargs.get("file", defaultbunchfilename)
             bunchfileformat = kwargs.get("fileformat", "pyorbit")            
 

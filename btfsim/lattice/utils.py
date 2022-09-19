@@ -1,11 +1,12 @@
-"""
-Module for loading magnet state and converting magnet values
-"""
-from btfsim.util import Defaults
-from btfsim.util import Utilities
-import numpy as np
-from orbit.utils.xml import XmlDataAdaptor
+"""Module to loading magnet states and convert magnet values."""
+import os
 from collections import OrderedDict
+import numpy as np
+
+from orbit.utils.xml import XmlDataAdaptor
+
+from btfsim.util.default import Default
+from btfsim.util import utils
 
 
 # functions for converting quad current to gradient (i2gl)
@@ -15,14 +16,12 @@ class magConvert(object):
         if not (coeffilename):
             print("no coeffilename specified")
             # -- get location of mag coefficients file
-            defaults = Defaults.getDefaults()
-            filename = (
-                defaults.defaultdict["HOMEDIR"] + defaults.defaultdict["MAG_COEFF"]
-            )
-            self.coeff = Utilities.file2dict(filename)
+            default = Default()
+            filename = os.path.join(default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"])
+            self.coeff = utils.file_to_dict(filename)
         else:
             print(coeffilename)
-            self.coeff = Utilities.file2dict(coeffilename)
+            self.coeff = utils.file_to_dict(coeffilename)
 
     def c2gl(self, quadname, scaledAI):
         """

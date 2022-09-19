@@ -124,8 +124,8 @@ class BunchCalculator:
     def twiss(self, dim='x', dispersion_flag=0, emit_norm_flag=0):
         """Return rms 2D Twiss parameters."""
         i = ['x', 'y', 'z'].index(dim)
-        alpha, beta = stats.twiss(self.cov)
-        eps = stats.emittance(self.cov)
+        alpha, beta = stats.twiss(self.cov, dim=dim)
+        eps = stats.emittance(self.cov, dim=dim)
         if emit_norm_flag and dim == 'z':
             eps *= self.gamma**3 * self.beta
         disp = self.twiss_analysis.getDispersion(i)
@@ -181,31 +181,29 @@ class BunchTracker:
         # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
         for i in range(6):
             for j in range(i + 1):
-                hist_keys.append('sig_{}{}'.format(i, j))
+                hist_keys.append('sig_{}{}'.format(j, i))
         hist_init_len = 10000
-        self.hist = dict(
-            (hist_keys[k], np.zeros(hist_init_len)) for k in range(len(hist_keys))
-        )
+        self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
         self.hist["node"] = []
 
-    def action_entrance(self, paramsDict):
+    def action_entrance(self, params_dict):
         """Executed at entrance of node."""
-        node = paramsDict["node"]
-        bunch = paramsDict["bunch"]
-        pos = paramsDict["path_length"]
-        if paramsDict["old_pos"] == pos:
+        node = params_dict["node"]
+        bunch = params_dict["bunch"]
+        pos = params_dict["path_length"]
+        if params_dict["old_pos"] == pos:
             return
-        if paramsDict["old_pos"] + paramsDict["pos_step"] > pos:
+        if params_dict["old_pos"] + params_dict["pos_step"] > pos:
             return
-        paramsDict["old_pos"] = pos
-        paramsDict["count"] += 1
+        params_dict["old_pos"] = pos
+        params_dict["count"] += 1
 
-        # -- update statement
-        nstep = paramsDict["count"]
+        # -- update statementb
+        nstep = params_dict["count"]
         npart = bunch.getSize()
         print(
-            "Step %i, Nparts %i, s=%.3f m, node %s"
-            % (nstep, npart, pos, node.getName())
+            "Step {}, Nparts {}, s={:.3f} m, node {}"
+            .format(nstep, npart, pos, node.getName())
         )
 
         calc = BunchCalculator(bunch)
@@ -270,40 +268,41 @@ class BunchTracker:
         r99 = dist.radial_extent(calc.coords[:, (0, 2)], 0.99) * 100.0  # [mm]
 
         # Correctly assign the number of particles for the 0th step
-        if paramsDict["count"] == 1:
-            self.hist["nparts"][paramsDict["count"] - 1] = nparts
+        if params_dict["count"] == 1:
+            self.hist["nparts"][params_dict["count"] - 1] = nparts
 
         # -- assign history arrays in hist dict
-        self.hist["s"][paramsDict["count"]] = pos
+        self.hist["s"][params_dict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["nparts"][paramsDict["count"]] = nparts
-        self.hist["alpha_x"][paramsDict["count"]] = alpha_x
-        self.hist["beta_x"][paramsDict["count"]] = beta_x
-        self.hist["eps_x"][paramsDict["count"]] = eps_x
-        self.hist["disp_x"][paramsDict["count"]] = disp_x
-        self.hist["dispp_x"][paramsDict["count"]] = dispp_x
-        self.hist["alpha_y"][paramsDict["count"]] = alpha_y
-        self.hist["beta_y"][paramsDict["count"]] = beta_y
-        self.hist["eps_y"][paramsDict["count"]] = eps_y
-        self.hist["alpha_z"][paramsDict["count"]] = alpha_z
-        self.hist["beta_z"][paramsDict["count"]] = beta_z
-        self.hist["eps_z"][paramsDict["count"]] = eps_z
+        self.hist["nparts"][params_dict["count"]] = nparts
+        self.hist["alpha_x"][params_dict["count"]] = alpha_x
+        self.hist["beta_x"][params_dict["count"]] = beta_x
+        self.hist["eps_x"][params_dict["count"]] = eps_x
+        self.hist["disp_x"][params_dict["count"]] = disp_x
+        self.hist["dispp_x"][params_dict["count"]] = dispp_x
+        self.hist["alpha_y"][params_dict["count"]] = alpha_y
+        self.hist["beta_y"][params_dict["count"]] = beta_y
+        self.hist["eps_y"][params_dict["count"]] = eps_y
+        self.hist["alpha_z"][params_dict["count"]] = alpha_z
+        self.hist["beta_z"][params_dict["count"]] = beta_z
+        self.hist["eps_z"][params_dict["count"]] = eps_z
         for i in range(6):
             for j in range(i + 1):
-                self.hist['sig_{}{}'.format(i, j)][paramsDict['count']] = Sigma[i, j]
-        self.hist["r90"][paramsDict["count"]] = r90
-        self.hist["r99"][paramsDict["count"]] = r99
-        self.hist["nlost"][paramsDict["count"]] = self.hist["nparts"][0] - nparts
+                self.hist['sig_{}{}'.format(j, i)][params_dict['count']] = Sigma[j, i]
+        self.hist["r90"][params_dict["count"]] = r90
+        self.hist["r99"][params_dict["count"]] = r99
+        self.hist["nlost"][params_dict["count"]] = self.hist["nparts"][0] - nparts
 
-    def action_exit(self, paramsDict):
+    def action_exit(self, params_dict):
         """Executed at node exit."""
-        self.action_entrance(paramsDict)
+        self.action_entrance(params_dict)
 
     def cleanup(self):
-        # Ignore where beam size is zero.
+        # Trim zeros from history.
         ind = np.where(self.hist["sig_11"] == 0)[0][1]
         for key, arr in self.hist.iteritems():
-            self.hist[key] = arr[1:ind]
+            istart = 0 if key == 'node' else 1
+            self.hist[key] = arr[istart:ind]
 
     def write_hist(self, filename=None, sep=' '):
         """Save history data.
@@ -312,7 +311,7 @@ class BunchTracker:
         """
         if filename is None:
             filename = "history.dat"
-        keys = list(self.hist)        
+        keys = list(self.hist)
         data = np.array([self.hist[key] for key in keys]).T
         df = pd.DataFrame(data=data, columns=keys)
         df.to_csv(filename, sep=sep, index=False)
@@ -327,25 +326,23 @@ class SingleParticleTracker:
     def __init__(self):
         hist_keys = ["s", "nparts", "x", "xp", "y", "yp", "z", "dE"]
         hist_init_len = 10000
-        self.hist = dict(
-            (hist_keys[k], np.zeros(hist_init_len)) for k in range(len(hist_keys))
-        )
+        self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
         self.hist["node"] = []
 
-    def action_entrance(self, paramsDict):
+    def action_entrance(self, params_dict):
         """Executed at node entrance."""
-        node = paramsDict["node"]
-        bunch = paramsDict["bunch"]
-        pos = paramsDict["path_length"]
-        if paramsDict["old_pos"] == pos:
+        node = params_dict["node"]
+        bunch = params_dict["bunch"]
+        pos = params_dict["path_length"]
+        if params_dict["old_pos"] == pos:
             return
-        if paramsDict["old_pos"] + paramsDict["pos_step"] > pos:
+        if params_dict["old_pos"] + params_dict["pos_step"] > pos:
             return
-        paramsDict["old_pos"] = pos
-        paramsDict["count"] += 1
+        params_dict["old_pos"] = pos
+        params_dict["count"] += 1
 
         # -- update statement
-        nstep = paramsDict["count"]
+        nstep = params_dict["count"]
         npart = bunch.getSize()
         print(
             "Step %i, Nparts %i, s=%.3f m, node %s"
@@ -363,22 +360,22 @@ class SingleParticleTracker:
         dE = bunch.dE(0) * 1000.0
 
         # -- assign history arrays in hist dict
-        self.hist["s"][paramsDict["count"]] = pos
+        self.hist["s"][params_dict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["nparts"][paramsDict["count"]] = nParts
-        self.hist["x"][paramsDict["count"]] = x
-        self.hist["y"][paramsDict["count"]] = y
-        self.hist["z"][paramsDict["count"]] = z
-        self.hist["xp"][paramsDict["count"]] = xp
-        self.hist["yp"][paramsDict["count"]] = yp
-        self.hist["dE"][paramsDict["count"]] = dE
+        self.hist["nparts"][params_dict["count"]] = nParts
+        self.hist["x"][params_dict["count"]] = x
+        self.hist["y"][params_dict["count"]] = y
+        self.hist["z"][params_dict["count"]] = z
+        self.hist["xp"][params_dict["count"]] = xp
+        self.hist["yp"][params_dict["count"]] = yp
+        self.hist["dE"][params_dict["count"]] = dE
 
-    def action_exit(self, paramsDict):
+    def action_exit(self, params_dict):
         """Executed at exit of node."""
-        self.action_entrance(paramsDict)
+        self.action_entrance(params_dict)
 
     def cleanup(self):
-        # -- trim 0's from hist
+        # Trim zeros from history.
         ind = np.where(self.hist["nparts"][1:] == 0)[0][0] + 1
         for key, arr in self.hist.iteritems():
             self.hist[key] = arr[0:ind]
@@ -555,19 +552,19 @@ class AdaptiveWeighting:
         )
         self.hist["node"] = []
 
-    def action_entrance(self, paramsDict):
+    def action_entrance(self, params_dict):
         """
         Executed at entrance of node
         """
-        node = paramsDict["node"]
-        bunch = paramsDict["bunch"]
-        pos = paramsDict["path_length"]
-        if paramsDict["old_pos"] == pos:
+        node = params_dict["node"]
+        bunch = params_dict["bunch"]
+        pos = params_dict["path_length"]
+        if params_dict["old_pos"] == pos:
             return
-        if paramsDict["old_pos"] + paramsDict["pos_step"] > pos:
+        if params_dict["old_pos"] + params_dict["pos_step"] > pos:
             return
-        paramsDict["old_pos"] = pos
-        paramsDict["count"] += 1
+        params_dict["old_pos"] = pos
+        params_dict["count"] += 1
 
         # -- count how many particles inside 1 RF period
         noutside = 0
@@ -581,11 +578,11 @@ class AdaptiveWeighting:
         bunch.macroSize(macrosize)
 
         # -- assign history arrays in hist dict
-        self.hist["s"][paramsDict["count"]] = pos
+        self.hist["s"][params_dict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["macro"][paramsDict["count"]] = macrosize
+        self.hist["macro"][params_dict["count"]] = macrosize
 
-    def action_exit(self, paramsDict):
+    def action_exit(self, params_dict):
         self.action_entrance()
 
         
