@@ -1,4 +1,5 @@
 .ipynb_checkpoints
+.pyc
 .DS_Store
 .idea
 *.png
@@ -6,5 +7,4 @@
 *.txt
 *.csv
 *.pyc
-.pyc
 
