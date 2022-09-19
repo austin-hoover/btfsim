@@ -1,25 +1,26 @@
+from __future__ import print_function
+import sys
 import os
-import numpy as np
 import time
+import numpy as np
 
-import orbit.utils.consts as consts
-from orbit.space_charge.sc3d import setSC3DAccNodes, setUniformEllipsesSCAccNodes
+from bunch import Bunch, BunchTwissAnalysis
 from spacecharge import SpaceChargeCalcUnifEllipse, SpaceChargeCalc3D
 from orbit.bunch_generators import TwissContainer, TwissAnalysis
 from orbit.bunch_generators import KVDist1D, KVDist2D, KVDist3D
 from orbit.bunch_generators import GaussDist1D, GaussDist2D, GaussDist3D
 from orbit.bunch_generators import WaterBagDist1D, WaterBagDist2D, WaterBagDist3D
-from bunch import Bunch, BunchTwissAnalysis
 from orbit.lattice import AccActionsContainer
 from orbit.py_linac.lattice_modifications import Add_quad_apertures_to_lattice
 from orbit.py_linac.lattice_modifications import Add_bend_apertures_to_lattice
 from orbit.py_linac.lattice_modifications import Add_drift_apertures_to_lattice
+from orbit.space_charge.sc3d import setSC3DAccNodes, setUniformEllipsesSCAccNodes
+import orbit.utils.consts as consts
 
-import btfsim.lattice.generate_btf_lattice as gen_lattice
 import btfsim.bunch.btf_linac_bunch_generator as gen_bunch
-import btfsim.util.defaults as default
 import btfsim.bunch.utils as butils
-from btfsim.plot.movie import MovieBase
+import btfsim.lattice.generate_btf_lattice as gen_lattice
+import btfsim.util.defaults as default
 
 
 class simBTF:
@@ -94,7 +95,7 @@ class simBTF:
         savefolder = kwargs.pop("savedir", "data/")
         self.movie = MovieBase(savefolder, **kwargs)
 
-    def run(self, start=0.0, stop=None, out='default'):
+    def run(self, start=0.0, stop=None, out='default', verbose=0):
         """Run the simulation.
 
         out : str
@@ -154,12 +155,12 @@ class simBTF:
         ## Add tracking action; load different tracking routine if bunch has only 
         ## one particle (single-particle tracking).
         if self.bunch_in.getSize() > 1:
-            self.tracker = butils.bunchTrack(
+            self.tracker = butils.BunchTracker(
                 dispersion_flag=self.dispersion_flag, 
                 emit_norm_flag=self.emit_norm_flag
             )
         elif self.bunch_in.getSize() == 1:
-            self.tracker = butils.spTrack()
+            self.tracker = butils.SingleParticleTracker()
         actionContainer.addAction(self.tracker.action_exit, AccActionsContainer.EXIT)
 
         # Run the simulation.
@@ -300,26 +301,25 @@ class simBTF:
         # -- if filename is passed,
         filename = kwargs.pop("filename", None)
         thisdict = kwargs.pop("dict", [])
-        units = kwargs.pop(
-            "units", "Amps"
-        )  # units for quad values. default is current [Amps],
-        # but GL [Tesla] also an option
+        
+        # Set units for quad values: current [Amps] or GL [Tesla].
+        units = kwargs.pop("units", "Amps") 
 
-        # -- set quads according to mstate file
+        # Set quads according to mstate file.
         if filename:
             # if filename[-6:] == 'mstate':
             self.lat.loadQuads(filename=filename, units=units)
             # if loaded from mstate, units are in Tesla by default, no need to specify
 
-        # -- set quads according to dict
+        # Set quads according to dict.
         if thisdict:
             self.lat.updateQuads(dict=thisdict, units=units)
 
-        # -- assume any remaining named arguments are quad/current pairs
+        # Assume any remaining named arguments are quad:current pairs.
         for quad, current in kwargs.items():
             self.lat.updateQuads(dict={quad: current}, units=units)
 
-        # -- update accel. model
+        # Update the lattice model.
         self.accLattice = self.lat.accLattice
 
     def init_sc_nodes(self, minlen=0.015, solver="ellipse", nellipse=1, 
@@ -343,28 +343,26 @@ class simBTF:
         gridmult = int(gridmult)
 
         print("Set up Space Charge nodes. ")
-
         if sc_solver == "ellipse":
-            # set of uniformly charged ellipses Space Charge    The bigger number of ellipse, the more accurate of sapce charge calculation
-            # Ellipse method can be used for the initial estimate, because it calculates faster than FFT method.
+            # Uniformly charged ellipsoid space charge solver. The more ellipsoids
+            # are used, the more accurate of space charge calculation. This 
+            # ellipse method can be used for the initial estimate because it
+            # is faster than the FFT method.
             calcUnifEllips = SpaceChargeCalcUnifEllipse(nellipse)
             space_charge_nodes = setUniformEllipsesSCAccNodes(
                 self.lat.accLattice, sc_path_length_min, calcUnifEllips
             )
         else:
-            # set FFT 3D Space Charge      FFT Poission solver, the more sizes (grids), the more accurate of space charge calculation
-            # Particle number should be increased by multiplier**3 when grid increases by a multiplier
-            sizeX = 2**gridmult
-            sizeY = 2**gridmult
-            sizeZ = 2**gridmult
-            calc3d = SpaceChargeCalc3D(sizeX, sizeY, sizeZ)
-            # right now can only model neighboring bunches if using Andrei's version of pyorbit
+            # 3D FFT space charge solver. The number of macro-particles 
+            # should be increased by m**3 when the grid resolution increases
+            # by factor m.
+            size_x = size_y = size_z = 2**gridmult
+            calc3d = SpaceChargeCalc3D(size_x, size_y, size_z)
             if n_bunches:
                 calc3d.numExtBunches(n_bunches)
                 calc3d.freqOfBunches(self.freq)
             space_charge_nodes = setSC3DAccNodes(
-                self.lat.accLattice, sc_path_length_min, calc3d
-            )
+                self.lat.accLattice, sc_path_length_min, calc3d)
 
         max_sc_length = 0.0
         min_sc_length = self.lat.accLattice.getLength()
@@ -375,7 +373,6 @@ class simBTF:
             if scL < min_sc_length:
                 min_sc_length = scL
 
-        # -- 'return' accLattice
         self.accLattice = self.lat.accLattice
         self.scnodes = space_charge_nodes
 
@@ -395,15 +392,14 @@ class simBTF:
             aprt_pipe_diameter,
             aprtNodes,
         )
-        # ---- This will print out the all aperture nodes and their positions
-        # #---- You can comment this part out if you wish
+        ## This will print out the all aperture nodes and their positions
         # for node in aprtNodes:
-        # 	print "aprt=",node.getName()," pos =",node.getPosition()
+        #     print "aprt=", node.getName()," pos =", node.getPosition()
         self.accLattice = self.lat.accLattice
         print("===== Aperture Nodes Added =======")
 
     def initSingleParticle(self, x=0.0, xp=0.0, y=0.0, yp=0.0, z=0.0, dE=0.0):
-        """Initialize bunch with one particle. ([m], [rad], [MeV])"""
+        """Initialize bunch with one particle. ([m], [rad], [MeV])."""
         # Convert to [m], [rad], [GeV].
         x0 = x * 1e-3
         y0 = y * 1e-3
@@ -411,7 +407,6 @@ class simBTF:
         yp0 = yp * 1e-3
         z0 = z * 1e-3
         dE0 = dE * 1e-3
-
         self.bunch_in = Bunch()
         self.bunch_in.charge(self.charge)
         self.bunch_in.addParticle(x0, xp0, y0, yp0, z0, dE0)
@@ -468,7 +463,7 @@ class simBTF:
             file = path to file containing macro particle distribution
             fileformat = 'pyorbit' ('parmteq' is also an option)
 
-        Input Twiss params are normalized RMS value; emit: mm-mrad; beta: mm/mrad
+        Input Twiss params are normalized RMS value; emit: mm-mrad; beta: mm/mrad.
         """
         # options are twiss, 2dxy, 2d+E, 2dxyz (others to be added later)
         bunchgenerator = kwargs.get("gen", "twiss") 
@@ -479,11 +474,10 @@ class simBTF:
                 .format(bunchgenerator)
             )
 
-        centering = kwargs.get(
-            "centering", 1
-        )  # if 0, does not center bunch coordinates.
+        # Decide whether to center the bunch coordinates (0 or 1).
+        centering = kwargs.get("centering", 1) 
 
-        # -- default values of twiss params (not used if generating function does not call for them...)
+        # Default values of twiss params (not used if generating function does not call for them...)
         alphaX = float(kwargs.get("ax", -1.9899))
         betaX = float(kwargs.get("bx", 0.19636))
         emitX = float(kwargs.get("ex", 0.160372))
@@ -494,12 +488,12 @@ class simBTF:
         betaZ = float(kwargs.get("bz", 0.6))
         emitZ = float(kwargs.get("ez", 0.2))
 
-        # ---make emittances un-normalized XAL units [m*rad]
+        # Make emittances un-normalized XAL units [m*rad].
         emitX = 1.0e-6 * emitX / (self.gamma * self.beta)
         emitY = 1.0e-6 * emitY / (self.gamma * self.beta)
         emitZ = 1.0e-6 * emitZ / (self.gamma**3 * self.beta)
 
-        # ---- transform to pyORBIT emittance[GeV*m]
+        # Transform to pyORBIT emittance [GeV*m].
         emitZ = emitZ * self.gamma**3 * self.beta**2 * self.mass
         betaZ = betaZ / (self.gamma**3 * self.beta**2 * self.mass)
         if bunchgenerator == "twiss":
@@ -518,7 +512,7 @@ class simBTF:
                 % (alphaZ, betaZ, emitZ * 1.0e6)
             )
 
-        # -- can load bunch through file
+        # Load bunch through file.
         if bunchgenerator == "load":
             defaultbunchfilename = (self.defaults.homedir + self.defaults.defaultdict["BUNCH_IN"])
             bunchfilename = kwargs.get("file", defaultbunchfilename)
@@ -557,18 +551,12 @@ class simBTF:
             ## where N_peak is peak number density
             print("Bunch read completed. Imported %i macroparticles." % nparts)
 
-        # -- or, can generate bunch by Twiss params or measured distributions
+        # Generate bunch by Twiss params or measured distributions.
         if bunchgenerator in ["twiss", "2d", "2d+E", "2dx3"]:
-
             nparts = kwargs.get("nparts", 200000)
             self.current = kwargs.get("current", 0.040)
-            # -- choose distributor class
-            bunchdistributor = kwargs.get(
-                "dist", "gaussian"
-            )  # options are waterbag, kv or gaussian
+            bunchdistributor = kwargs.get("dist", "gaussian") 
             cut_off = kwargs.get("cutoff", -1)
-
-            # -- use generator to make bunch according to specified distributor class
             distributorClass = None
             if bunchdistributor == "gaussian":
                 if bunchgenerator == "twiss":
@@ -587,17 +575,15 @@ class simBTF:
                     distributorClass = KVDist1D
             else:
                 raise ValueError(
-                    "Do not recognize distributor %s. Accepted classes are 'gaussian', 'waterbag','kv'"
-                    % bunchdistributor
+                    "Unrecognized distributor {}. Accepted classes are 'gaussian', 'waterbag', 'kv'."
+                    .format(bunchdistributor)
                 )
 
-            # -- make generator instances
+            # Make generator instances.
             if bunchgenerator == "twiss":
-
                 twissX = TwissContainer(alphaX, betaX, emitX)
                 twissY = TwissContainer(alphaY, betaY, emitY)
                 twissZ = TwissContainer(alphaZ, betaZ, emitZ)
-
                 print("Generating bunch based off twiss parameters ( N = %i )" % nparts)
                 bunch_gen = gen_bunch.BTF_Linac_BunchGenerator(
                     twissX,
@@ -704,9 +690,9 @@ class simBTF:
             self.center_bunch()
 
     def center_bunch(self):
-        """
-        Bunch center after generating can have small deviation from the (0,0,0,0,0,0)
-        This function will force centering the bunch.
+        """Force the bunch to be centered.
+        
+        Typically used to correct small deviations from 0.
         """
         twiss_analysis = BunchTwissAnalysis()
         twiss_analysis.analyzeBunch(self.bunch_in)
@@ -729,13 +715,11 @@ class simBTF:
         )
 
     def shift_bunch(self, **kwargs):
-
         # -- initial position/angle
         x0 = float(kwargs.get("x0", 0.0))
         xp0 = float(kwargs.get("xp0", 0.0))
         y0 = float(kwargs.get("y0", 0.0))
         yp0 = float(kwargs.get("yp0", 0.0))
-
         # -- shift centroid according to x0, y0 etc
         for i in range(self.bunch_in.getSize()):
             x = self.bunch_in.x(i)  # retrieve value

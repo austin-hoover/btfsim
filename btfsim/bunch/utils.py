@@ -1,16 +1,18 @@
-"""Utilities for manipulation of bunches."""
+"""Utilities for PyORBIT bunch manipulation."""
+import sys
+import os
 import numpy as np
-from bunch import Bunch, BunchTwissAnalysis
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
+import pandas as pd
 from scipy.optimize import curve_fit
 
+from bunch import Bunch
+from bunch import BunchTwissAnalysis
 
-# Gaussian function for fitting
-def fit_gauss(x, mu=0.0, *params):
+from btfsim.analysis import stats
+from btfsim.analysis import dist
+
+
+def fit_gauss(x, mu=0.0, *params):    
     A, sigma = params
     return A * np.exp(-((x - mu)**2) / (2.0 * sigma**2))
 
@@ -97,8 +99,8 @@ class BunchCompare:
         return d
 
 
-class BunchCalculation:
-    
+class BunchCalculator:
+
     def __init__(self, bunch, file=None):
         if isinstance(bunch, Bunch):
             self.bunch = bunch
@@ -122,40 +124,19 @@ class BunchCalculation:
     def twiss(self, dim='x', dispersion_flag=0, emit_norm_flag=0):
         """Return rms 2D Twiss parameters."""
         i = ['x', 'y', 'z'].index(dim)
-        d = self.twiss_analysis.getDispersion(ind)
-        dp = self.twiss_analysis.getDispersionDerivative(ind)
-        i = 2 * ['x', 'y', 'z'].index(dim)
-        sigma = self.cov[i:i+2, i:i+2]
-        eps = np.sqrt(np.linalg.det(sigma))
-        beta = sigma[0, 0] / eps
-        alpha = -sigma[0, 1] / eps
+        alpha, beta = stats.twiss(self.cov)
+        eps = stats.emittance(self.cov)
         if emit_norm_flag and dim == 'z':
             eps *= self.gamma**3 * self.beta
+        disp = self.twiss_analysis.getDispersion(i)
+        dispp = self.twiss_analysis.getDispersionDerivative(i)
         return {
-            "beta": {"value": b, "unit": "mm/mrad"},
-            "alpha": {"value": a, "unit": ""},
-            "eps": {"value": e, "unit": "mm-mrad"},
-            "disp": {"value": d, "unit": "m"},
-            "dispp": {"value": dp, "unit": ""},
+            "beta": {"value": beta, "unit": "mm/mrad"},
+            "alpha": {"value": alpha, "unit": ""},
+            "eps": {"value": eps, "unit": "mm-mrad"},
+            "disp": {"value": disp, "unit": "m"},
+            "dispp": {"value": dispp, "unit": ""},
         }
-
-    def extent(self, fraction):
-        """Calculate max radial extent [m] containing fraction of particles.
-
-        bunch: Bunch() instance
-        fraction: fraction of particles to count. Eg, 0.90 for 90% extent.
-        """
-        radii = np.linalg.norm(self.coords[:, [0, 2]], axis=0)
-        radii = np.sort(radii)
-        if (X.shape[0] * fraction < 100.0):
-            nn = self.coords.shape[0] - 1
-        else:
-            nn = np.round(self.coords.shape[0] * fraction)
-        try:
-            fraction = r[int(nn)]
-        except:
-            fraction = 0.0
-        return fraction
         
     def norm_coords(self, dim='x'):
         """Return coordinates normalized by rms Twiss parameters in x-x', y-y', z-z'."""
@@ -174,12 +155,9 @@ class BunchCalculation:
         raise NotImplementedError
 
 
-class BunchTrack:
+class BunchTracker:
     """Class to store beam evolution data.
     
-    This class also has as a method that is called on action entrance to add 
-    to the beam evolution array.
-
     dispersion_flag = 0; set to 1 to subtract dispersive term from emittances
     emit_norm_flag = 0; set to 1 fo calculate normalized emittances
     """
@@ -187,30 +165,26 @@ class BunchTrack:
         self.twiss_analysis = BunchTwissAnalysis()
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
-        histkeys = [
+        hist_keys = [
             "s",
-            "npart",
+            "nparts",
             "nlost",
-            "alpha_x",
-            "beta_x",
-            "eps_x",
-            "alpha_y",
-            "beta_y",
-            "eps_y",
-            "alpha_z",
-            "beta_z",
-            "eps_z",
-            "sigxx",
-            "sigyy",
-            "sigxy",
+            "disp_x",
+            "dispp_x",
             "r90",
             "r99",
-            "dx",
-            "dpx",
         ]
-        histinitlen = 10000
+        # Add 2D alpha, beta, and emittance keys.
+        for dim in ['x', 'y', 'z']:
+            for name in ['alpha', 'beta', 'eps']:
+                hist_keys.append('{}_{}'.format(name, dim))
+        # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
+        for i in range(6):
+            for j in range(i + 1):
+                hist_keys.append('sig_{}{}'.format(i, j))
+        hist_init_len = 10000
         self.hist = dict(
-            (histkeys[k], np.zeros(histinitlen)) for k in range(len(histkeys))
+            (hist_keys[k], np.zeros(hist_init_len)) for k in range(len(hist_keys))
         )
         self.hist["node"] = []
 
@@ -234,171 +208,132 @@ class BunchTrack:
             % (nstep, npart, pos, node.getName())
         )
 
-        calc = BunchCalculation(bunch)
-        twissx = calc.Twiss(
+        calc = BunchCalculator(bunch)
+        twiss_x = calc.twiss(
             dim="x",
             dispersion_flag=self.dispersion_flag,
             emit_norm_flag=self.emit_norm_flag,
         )
-        (alphaX, betaX, emittX) = (
-            twissx["alpha"]["value"],
-            twissx["beta"]["value"],
-            twissx["eps"]["value"],
+        alpha_x, beta_x, eps_x = (
+            twiss_x["alpha"]["value"],
+            twiss_x["beta"]["value"],
+            twiss_x["eps"]["value"],
         )
-        (dispX, disppX) = (twissx["disp"]["value"], twissx["dispp"]["value"])
-        twissy = calc.Twiss(
+        disp_x, dispp_x = (twiss_x["disp"]["value"], twiss_x["dispp"]["value"])
+        twiss_y = calc.twiss(
             dim="y",
             dispersion_flag=self.dispersion_flag,
             emit_norm_flag=self.emit_norm_flag,
         )
-        (alphaY, betaY, emittY) = (
-            twissy["alpha"]["value"],
-            twissy["beta"]["value"],
-            twissy["eps"]["value"],
+        alpha_y, beta_y, eps_y = (
+            twiss_y["alpha"]["value"],
+            twiss_y["beta"]["value"],
+            twiss_y["eps"]["value"],
         )
-        twissz = calc.Twiss(
+        twiss_z = calc.twiss(
             dim="z",
             dispersion_flag=self.dispersion_flag,
             emit_norm_flag=self.emit_norm_flag,
         )
-        (alphaZ, betaZ, emittZ) = (
-            twissz["alpha"]["value"],
-            twissz["beta"]["value"],
-            twissz["eps"]["value"],
+        alpha_z, beta_z, eps_z = (
+            twiss_z["alpha"]["value"],
+            twiss_z["beta"]["value"],
+            twiss_z["eps"]["value"],
         )
-        nParts = bunch.getSizeGlobal()
+        nparts = bunch.getSizeGlobal()
         gamma = bunch.getSyncParticle().gamma()
         beta = bunch.getSyncParticle().beta()
 
         ## -- compute twiss (this is somehow more robust than above...but doesn't include dispersion flag..)
         # self.twiss_analysis.analyzeBunch(bunch)
-        # (alphaX,betaX,emittX) = (self.twiss_analysis.getEffectiveAlpha(0),self.twiss_analysis.getEffectiveBeta(0),self.twiss_analysis.getEffectiveEmittance(0)*1.0e+6)
-        # (alphaY,betaY,emittY) = (self.twiss_analysis.getEffectiveAlpha(1),self.twiss_analysis.getEffectiveBeta(1),self.twiss_analysis.getEffectiveEmittance(1)*1.0e+6)
-        # (alphaZ,betaZ,emittZ) = (self.twiss_analysis.getTwiss(2)[0],self.twiss_analysis.getTwiss(2)[1],self.twiss_analysis.getTwiss(2)[3]*1.0e+6)
-
-        x_rms = np.sqrt(betaX * emittX) / 10.0  # [cm]
-        y_rms = np.sqrt(betaY * emittY) / 10.0  # [cm]
-        z_rms = np.sqrt(betaZ * emittZ)  # [m]
-
-        # Compute covariance matrix.
-        Sigma = calc.cov()
+        # alphaX, betaX, emittX = (
+        #     self.twiss_analysis.getEffectiveAlpha(0),
+        #     self.twiss_analysis.getEffectiveBeta(0),
+        #     self.twiss_analysis.getEffectiveEmittance(0) * 1.0e+6,
+        # )
+        # alphaY, betaY, emittY = (
+        #     self.twiss_analysis.getEffectiveAlpha(1),
+        #     self.twiss_analysis.getEffectiveBeta(1),
+        #     self.twiss_analysis.getEffectiveEmittance(1) * 1.0e+6,
+        # )
+        # alphaZ, betaZ, emittZ = (
+        #     self.twiss_analysis.getTwiss(2)[0],
+        #     self.twiss_analysis.getTwiss(2)[1],
+        #     self.twiss_analysis.getTwiss(2)[3] * 1.0e+6,
+        # )
+        
+        # Covariance matrix.
+        Sigma = calc.cov
         
         # -- compute 90%, 99% extent
-        r90 = calc.Extent(0.90) * 1e2
-        r99 = calc.Extent(0.99) * 1e2
+        r90 = dist.radial_extent(calc.coords[:, (0, 2)], 0.90) * 100.0  # [mm]
+        r99 = dist.radial_extent(calc.coords[:, (0, 2)], 0.99) * 100.0  # [mm]
 
         # Correctly assign the number of particles for the 0th step
         if paramsDict["count"] == 1:
-            self.hist["npart"][paramsDict["count"] - 1] = nParts
+            self.hist["nparts"][paramsDict["count"] - 1] = nparts
 
         # -- assign history arrays in hist dict
         self.hist["s"][paramsDict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["npart"][paramsDict["count"]] = nParts
-        self.hist["xrms"][paramsDict["count"]] = x_rms
-        self.hist["yrms"][paramsDict["count"]] = y_rms
-        self.hist["zrms"][paramsDict["count"]] = z_rms
-        self.hist["alpha_x"][paramsDict["count"]] = alphaX
-        self.hist["beta_x"][paramsDict["count"]] = betaX
-        self.hist["eps_x"][paramsDict["count"]] = emittX
-        self.hist["dx"][paramsDict["count"]] = dispX
-        self.hist["dpx"][paramsDict["count"]] = disppX
-        self.hist["alpha_y"][paramsDict["count"]] = alphaY
-        self.hist["beta_y"][paramsDict["count"]] = betaY
-        self.hist["eps_y"][paramsDict["count"]] = emittY
-        self.hist["alpha_z"][paramsDict["count"]] = alphaZ
-        self.hist["beta_z"][paramsDict["count"]] = betaZ
-        self.hist["eps_z"][paramsDict["count"]] = emittZ
-        self.hist["sigxx"][paramsDict["count"]] = sigxx
-        self.hist["sigyy"][paramsDict["count"]] = sigyy
-        self.hist["sigxy"][paramsDict["count"]] = sigxy
+        self.hist["nparts"][paramsDict["count"]] = nparts
+        self.hist["alpha_x"][paramsDict["count"]] = alpha_x
+        self.hist["beta_x"][paramsDict["count"]] = beta_x
+        self.hist["eps_x"][paramsDict["count"]] = eps_x
+        self.hist["disp_x"][paramsDict["count"]] = disp_x
+        self.hist["dispp_x"][paramsDict["count"]] = dispp_x
+        self.hist["alpha_y"][paramsDict["count"]] = alpha_y
+        self.hist["beta_y"][paramsDict["count"]] = beta_y
+        self.hist["eps_y"][paramsDict["count"]] = eps_y
+        self.hist["alpha_z"][paramsDict["count"]] = alpha_z
+        self.hist["beta_z"][paramsDict["count"]] = beta_z
+        self.hist["eps_z"][paramsDict["count"]] = eps_z
+        for i in range(6):
+            for j in range(i + 1):
+                self.hist['sig_{}{}'.format(i, j)][paramsDict['count']] = Sigma[i, j]
         self.hist["r90"][paramsDict["count"]] = r90
         self.hist["r99"][paramsDict["count"]] = r99
-        self.hist["nlost"][paramsDict["count"]] = self.hist["npart"][0] - nParts
+        self.hist["nlost"][paramsDict["count"]] = self.hist["nparts"][0] - nparts
 
     def action_exit(self, paramsDict):
-        """
-        Executed at exit of node
-        """
+        """Executed at node exit."""
         self.action_entrance(paramsDict)
 
     def cleanup(self):
-        # -- trim 0's from hist
-        ind = np.where(self.hist["xrms"] == 0)[0][1]
+        # Ignore where beam size is zero.
+        ind = np.where(self.hist["sig_11"] == 0)[0][1]
         for key, arr in self.hist.iteritems():
             self.hist[key] = arr[1:ind]
 
-    def writehist(self, **kwargs):
-        """
-        Save history data
-        optional argument:
+    def write_hist(self, filename=None, sep=' '):
+        """Save history data.
+        
         filename = location to save data
         """
-
-        # --- file name + location
-        defaultfilename = "btf_output_data.txt"
-        filename = kwargs.get("filename", defaultfilename)
-
-        # -- open files to write data
-        file_out = open(filename, "w")
-        header = "s[m], nparts, xrms [cm], yrms [cm], zrms [cm], ax, bx, ex[mm-mrad], ay, by, ey[mm-mrad], az, bz, ez[m-GeV], sigx[cm], sigy[cm], sigxx[cm2], sigyy[cm2], sigxy[cm2], r90[cm], r99[cm], Dx [m], Dxp \n"
-        file_out.write(header)
-
-        for i in range(len(self.hist["s"])):
-            line = "%.3f %i " % (self.hist["s"][i], self.hist["npart"][i])
-            line += "%.3f %.3f %.3f " % (
-                self.hist["xrms"][i],
-                self.hist["yrms"][i],
-                self.hist["zrms"][i],
-            )
-            line += "%.3f %.3f %.6f " % (
-                self.hist["alpha_x"][i],
-                self.hist["beta_x"][i],
-                self.hist["eps_x"][i],
-            )
-            line += "%.3f %.3f %.6f " % (
-                self.hist["alpha_y"][i],
-                self.hist["beta_y"][i],
-                self.hist["eps_y"][i],
-            )
-            line += "%.3f %.3f %.6f " % (
-                self.hist["alpha_z"][i],
-                self.hist["beta_z"][i],
-                self.hist["eps_z"][i],
-            )
-            line += "%.5f %.5f %.6f " % (
-                self.hist["sigx"][i],
-                self.hist["sigy"][i],
-                self.hist["sigxx"][i],
-            )
-            line += "%.6f %.6f " % (self.hist["sigyy"][i], self.hist["sigxy"][i])
-            line += "%.4f %.4f " % (self.hist["r90"][i], self.hist["r99"][i])
-            line += "%.4f %.4f \n" % (self.hist["dx"][i], self.hist["dpx"][i])
-            file_out.write(line)
-
-        file_out.close()
+        if filename is None:
+            filename = "history.dat"
+        keys = list(self.hist)        
+        data = np.array([self.hist[key] for key in keys]).T
+        df = pd.DataFrame(data=data, columns=keys)
+        df.to_csv(filename, sep=sep, index=False)
+        return df
 
 
-class spTrack:
+class SingleParticleTracker:
+    """This class holds array with beam evolution data.
+    
+    Copy of BunchTracker class modified for single-particle tracking (no twiss/size data)
     """
-    This class holds array with beam evolution data
-    Copy of bunchTrack class modified for single-particle tracking (no twiss/size data)
-    """
-
     def __init__(self):
-
-        # -- initialize history arrays in hist dict
-        histkeys = ["s", "npart", "x", "xp", "y", "yp", "z", "dE"]
-        histinitlen = 10000
+        hist_keys = ["s", "nparts", "x", "xp", "y", "yp", "z", "dE"]
+        hist_init_len = 10000
         self.hist = dict(
-            (histkeys[k], np.zeros(histinitlen)) for k in range(len(histkeys))
+            (hist_keys[k], np.zeros(hist_init_len)) for k in range(len(hist_keys))
         )
         self.hist["node"] = []
 
     def action_entrance(self, paramsDict):
-        """
-        Executed at entrance of node
-        """
+        """Executed at node entrance."""
         node = paramsDict["node"]
         bunch = paramsDict["bunch"]
         pos = paramsDict["path_length"]
@@ -430,7 +365,7 @@ class spTrack:
         # -- assign history arrays in hist dict
         self.hist["s"][paramsDict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["npart"][paramsDict["count"]] = nParts
+        self.hist["nparts"][paramsDict["count"]] = nParts
         self.hist["x"][paramsDict["count"]] = x
         self.hist["y"][paramsDict["count"]] = y
         self.hist["z"][paramsDict["count"]] = z
@@ -439,20 +374,18 @@ class spTrack:
         self.hist["dE"][paramsDict["count"]] = dE
 
     def action_exit(self, paramsDict):
-        """
-        Executed at exit of node
-        """
+        """Executed at exit of node."""
         self.action_entrance(paramsDict)
 
     def cleanup(self):
         # -- trim 0's from hist
-        ind = np.where(self.hist["npart"][1:] == 0)[0][0] + 1
+        ind = np.where(self.hist["nparts"][1:] == 0)[0][0] + 1
         for key, arr in self.hist.iteritems():
             self.hist[key] = arr[0:ind]
 
-    def writehist(self, **kwargs):
-        """
-        Save history data
+    def write_hist(self, **kwargs):
+        """Save history data.
+        
         optional argument:
         filename = location to save data
         """
@@ -470,7 +403,7 @@ class spTrack:
             line = "%.3f %s %i %.6f %.6f %.6f %.6f %.6f %.6f \n" % (
                 self.hist["s"][i],
                 self.hist["node"][i].split(":")[-1],
-                self.hist["npart"][i],
+                self.hist["nparts"][i],
                 self.hist["x"][i],
                 self.hist["xp"][i],
                 self.hist["y"][i],
@@ -484,8 +417,7 @@ class spTrack:
 
 
 class Beamlet:
-    """
-    Class to create beamlet out of specified bunch distribution.
+    """Class to create beamlet out of specified bunch distribution.
 
     optional arguments:
 
@@ -503,7 +435,6 @@ class Beamlet:
     dEwidth = 0.4 keV (~energy slit resolution
 
     """
-
     def __init__(self, bunch_in, z2phase, **kwargs):
         self.z2phase = z2phase
         self.bunch_in = bunch_in
@@ -609,18 +540,18 @@ class Beamlet:
         return beamlet
 
 
-class adaptiveWeighting:
-    """This class adjusts macroparticle weight dynamically."""
-
+class AdaptiveWeighting:
+    """Dynamic macro-particle weight adjustment."""
+    
     def __init__(self, z2phase, macrosize0):
         self.z2phase = z2phase
         self.macrosize0 = macrosize0
 
         # -- initialize history arrays in hist dict
-        histkeys = ["s", "macro"]
-        histinitlen = 10000
+        hist_keys = ["s", "macro"]
+        hist_init_len = 10000
         self.hist = dict(
-            (histkeys[k], np.zeros(histinitlen)) for k in range(len(histkeys))
+            (hist_keys[k], np.zeros(hist_init_len)) for k in range(len(hist_keys))
         )
         self.hist["node"] = []
 
@@ -656,3 +587,9 @@ class adaptiveWeighting:
 
     def action_exit(self, paramsDict):
         self.action_entrance()
+
+        
+class Plotter:
+    
+    def __init__(self, ):
+        return
