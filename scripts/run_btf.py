@@ -37,7 +37,7 @@ nPMQs = 19  # number of permanent-magnet quadrupoles
 
 # Bunch
 fio['in']['bunch'] = 'data/bunch/realisticLEBT_50mA_42mA_8555k.dat'
-bunch_dec_factor = None  # decrease number of particles by this power of 10
+bunch_dec_factor = None
 x0 = 0.0  # [m]
 y0 = 0.0  # [m]
 xp0 = 0.0  # [rad]
@@ -45,8 +45,8 @@ yp0 = 0.0  # [rad]
 beam_current = 26.0  # current to use in simulation [mA]
 beam_current_input = 42.0  # current specified in input bunch file [mA]
                            # (should we read this automatically?)
-
 # Space charge
+use_space_charge = True
 sclen = 0.01  # [m]
 gridmult = 6
 n_bunches = 3  # number of bunches to model
@@ -55,12 +55,36 @@ n_bunches = 3  # number of bunches to model
 # Initialize simulation
 # ------------------------------------------------------------------------------
 _base = '{}-{}-{}-{}'.format(timestamp, script_name, start, stop)
-fio['out']['bunch'] = _base + '_bunch.dat'
+fio['out']['bunch'] = _base + '_bunch_{}.dat'.format(stop)
 fio['out']['history'] = os.path.join(outdir, _base + '_history.dat')
 
 sim = main.simBTF(outdir=outdir)
 sim.dispersion_flag = int(dispersion_flag)
 sim.init_lattice(beamline=["MEBT1", "MEBT2", "MEBT3"], mstatename=fio['in']['mstate'])
+
+
+# Temp: add bunch monitor nodes.
+from orbit.teapot import DriftTEAPOT
+
+class BunchMonitorNode(DriftTEAPOT):
+    def __init__(self, filename='bunch.dat', name='bunch_monitor'):
+        DriftTEAPOT.__init__(self, name)
+        self.setLength(0.0)
+        self.filename = filename
+    def track(self, params_dict):
+        bunch = params_dict['bunch']
+        bunch.dumpBunch(self.filename)
+        
+lattice = sim.accLattice
+for node in lattice.getNodes():
+    if node.getName() in ['MEBT:QH01', 'MEBT:QV02', 'MEBT:QH03', 'MEBT:QV04']:
+        filename = os.path.join(outdir, _base + '_bunch_{}.dat'.format(node.getName()))
+        bunch_monitor_node = BunchMonitorNode(filename=filename)
+        node.addChildNode(bunch_monitor_node, node.ENTRANCE)
+
+for node in lattice.getNodes():
+    print(node.getName(), node.getPosition())
+    
 
 # Overlapping nodes: replace quads with analytic model. (Must come after 
 # `lattice.init()` but before `lattice.init_sc_nodes()`.)
@@ -77,8 +101,8 @@ if replace_quads:
         quad_Names=quad_names, 
         EngeFunctionFactory=quadfunc,
     )
-
-sim.init_sc_nodes(minlen=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunches)
+if use_space_charge:
+    sim.init_sc_nodes(minlen=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunches)
 sim.init_bunch(gen="load", file=os.path.join(os.getcwd(), fio['in']['bunch']))
 sim.attenuate_bunch(beam_current / beam_current_input)
 if bunch_dec_factor is not None and bunch_dec_factor > 1:
