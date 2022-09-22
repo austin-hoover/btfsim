@@ -39,23 +39,14 @@ class Sim:
     frequency : float
         
     bunch_in : Bunch
-        Input bunch to the simulation. It is copied to a different bunch
+        Input bunch to the simulation. It is copied to a `bunch_track`
         for tracking.
-    
+    bunch_track : Bunch
+        Bunch used for tracking; overwritten each time simulation is run.
     lattice : orbit.lattice.AccLattice
         Lattice for tracking.
     latgen : btfsim.lattice.generate_btf_lattice.LatticeGenerator
         Instance of lattice generator class.
-    bunch_in
-    bunch_track
-
-    Methods
-    -------
-    run
-    init_lattice
-    init_sc_nodes
-    init_bunch
-    change_quads
     """
     def __init__(self, outdir=None):
         self.ekin = 0.0025  # [GeV]
