@@ -4,7 +4,6 @@
 .idea
 *.png
 *.dat
-*.txt
 *.csv
 *.pyc
 
