@@ -1,6 +1,6 @@
 # btf-simulation
 
-Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using PyORBIT.
+Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using [pyorbit](https://github.com/PyORBIT-Collaboration/py-orbit).
 
 Adapted from K. Ruisard's repo.
 
@@ -13,3 +13,5 @@ Adapted from K. Ruisard's repo.
         * Each folder should have a README.txt or README.md describing the study.
         * All analysis scripts/notebooks are kept here as well. Jupyter notebooks should be cleared before commiting changes.
         * No data is tracked with git; data will be stored on DropBox or external drive with same file structure as the `scripts` folder.
+        
+All data analysis/visualization routines will be stored in the [`beamphys`](https://github.com/austin-hoover/beamphys) repository. 
