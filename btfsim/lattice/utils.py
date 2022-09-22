@@ -1,4 +1,5 @@
 """Module to loading magnet states and convert magnet values."""
+from __future__ import print_function
 import os
 from collections import OrderedDict
 import numpy as np
@@ -9,25 +10,26 @@ from btfsim.util.default import Default
 from btfsim.util import utils
 
 
-# functions for converting quad current to gradient (i2gl)
-class magConvert(object):
-    # converst gradients to currents and vice versa, based on cofficients in file
-    def __init__(self, coeffilename=""):
-        if not (coeffilename):
-            print("no coeffilename specified")
-            # -- get location of mag coefficients file
+class MagnetConverter(object):
+    """Convert between gradient and current based on coefficients in file."""
+
+    def __init__(self, coef_filename=None):
+        self.coef_filename = coef_filename
+        if self.coef_filename is None:
             default = Default()
-            filename = os.path.join(default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"])
-            self.coeff = utils.file_to_dict(filename)
-        else:
-            print(coeffilename)
-            self.coeff = utils.file_to_dict(coeffilename)
+            self.coef_filename = os.path.join(
+                default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"]
+            )
+        print("coef_filename:", self.coef_filename)
+        self.coeff = utils.file_to_dict(self.coef_filename)
 
     def c2gl(self, quadname, scaledAI):
-        """
-        arguments:
-        1 - Name of quad (ie, QH01)
-        2 - Current setpoint (corresponds with scaled AI in IOC), [A]
+        """Convert current to gradient.
+
+        quadname : str
+            Quadrupole name (i.e., 'QH01').
+        scaledAI : float
+            Current setpoint (corresponds with scaled AI in IOC) [A].
         """
         scaledAI = float(scaledAI)
         try:
@@ -36,17 +38,20 @@ class magConvert(object):
             GL = A * scaledAI + B * scaledAI**2
         except KeyError:
             print(
-                "Do not know conversion factor for element %s, gradient value not assigned"
-                % quadname
+                "Do not know conversion factor for element {}; gradient value not assigned.".format(
+                    quadname
+                )
             )
             GL = []
         return GL
 
     def gl2c(self, quadname, GL):
-        """
-        arguments:
-        1 - Name of quad (ie, QH01)
-        2 - Integrated gradient (GL), [T]
+        """Convert gradient to current.
+
+        quadname : str
+            Quadrupole name (i.e., 'QH01').
+        GL : float
+            Integrated gradient [T].
         """
         GL = float(GL)
         try:
@@ -60,74 +65,63 @@ class magConvert(object):
                 scaledAI = 0.5 * (A / B) * (-1 + np.sqrt(1 + 4 * GL * B / A**2))
         except KeyError:
             print(
-                "Do not know conversion factor for element %s, current set to 0"
-                % quadname
+                "Do not know conversion factor for element {}; current set to zero.".format(
+                    quadname
+                )
             )
             scaledAI = 0
         return scaledAI
 
     def igrad2current(self, inputdict):
-        """
-        Input is dictionary where key is name of magnet, and value is integrated gradient GL [T]
-        """
+        """inputdict has key = magnet name, value = integrated gradient GL [T]."""
         outputdict = OrderedDict.fromkeys(self.coeff.keys(), [])
         for name in inputdict:
             try:
                 outputdict[name] = self.gl2c(name, inputdict[name])
             except:
-                print("something went wrong on element %s" % name)
+                print("Something went wrong on element {}.".format(name))
         return outputdict
 
     def current2igrad(self, inputdict):
-        """
-        Input is dictionary where key is name of magnet, and value is current setpoint [A]
-        """
+        """inputdict has key = magnet name, value = current setpoint [A]."""
         outputdict = OrderedDict.fromkeys(self.coeff.keys(), [])
         for name in inputdict:
             try:
                 outputdict[name] = self.c2gl(name, inputdict[name])
             except:
-                print("something went wrong on element %s" % name)
+                print("Something went wrong on element {}.".format(name))
         return outputdict
 
 
-# functions to load settings from SCORE .mstate file
-def loadQuadSetpoint(filename):
-    """
-    This retrieves quadrupole setpoints (in Amps) from .mstate file
-    Returns dictionary matching quad name with current setpoint
+# Functions to load settings from SCORE (.mstate file)
+# ------------------------------------------------------------------------------
+def load_quad_setpoint(filename):
+    """Retrieve quadrupole setpoints [A] from .mstate file.
+
+    Returns dictionary matching quad name with current setpoint.
     """
     state_da = XmlDataAdaptor.adaptorForFile(filename)
     thisstate = state_da.data_adaptors[0]
-
     setpointdict = OrderedDict()
     for item in thisstate.data_adaptors:
         pvname = item.getParam("setpoint_pv").split(":")
         psname = pvname[1].split("_")
         magname = psname[1]
-        # -- get current set-point
-        setpoint = float(item.getParam("setpoint"))
-        setpointdict[magname] = setpoint
-
+        setpointdict[magname] = float(item.getParam("setpoint"))
     return setpointdict
 
 
 def loadQuadReadback(filename):
-    """
-    This retrieves quadrupole readback (in Tesla) from .mstate file
-    Returns dictionary matching quad name with field readback
-    """
+    """Retrieve quadrupole readbacks [T] from .mstate file.
 
+    Returns dictionary matching quad name with field readback.
+    """
     state_da = XmlDataAdaptor.adaptorForFile(filename)
     thisstate = state_da.data_adaptors[0]
-
     readbackdict = OrderedDict()
     for item in thisstate.data_adaptors:
-        # -- get magnet name from pvname
         pvname = item.getParam("setpoint_pv").split(":")
         psname = pvname[1].split("_")
         magname = psname[1]
-        # -- get current set-point
-        readback = float(item.getParam("readback"))
-        readbackdict[magname] = readback
+        readbackdict[magname] = float(item.getParam("readback"))
     return readbackdict

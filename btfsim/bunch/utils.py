@@ -1,4 +1,5 @@
 """Utilities for PyORBIT bunch manipulation."""
+from __future__ import print_function
 import sys
 import os
 import numpy as np
@@ -12,11 +13,11 @@ from btfsim.analysis import stats
 from btfsim.analysis import dist
 
 
-def fit_gauss(x, mu=0.0, *params):    
+def fit_gauss(x, mu=0.0, *params):
     A, sigma = params
-    return A * np.exp(-((x - mu)**2) / (2.0 * sigma**2))
+    return A * np.exp(-((x - mu) ** 2) / (2.0 * sigma**2))
 
-            
+
 def bunch_coord_array(bunch):
     """Return bunch coordinate array."""
     X = np.zeros((bunch.getSize(), 6))
@@ -30,18 +31,40 @@ def bunch_coord_array(bunch):
     return X
 
 
+def cov(bunch):
+    """Return 6x6 covariance matrix."""
+    return np.cov(bunch_coord_array(bunch).T)
+
+
+def decorrelate_x_y_z(bunch):
+    """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
+    X = bunch_coord_array(bunch)
+    for i in (0, 2, 4):
+        idx = np.random.permutation(np.arange(X.shape[0]))
+        X[:, i : i + 2] = X[idx, i : i + 2]
+    for i, (x, xp, y, yp, z, dE) in enumerate(X):
+        bunch.x(i, x)
+        bunch.y(i, y)
+        bunch.z(i, z)
+        bunch.xp(i, xp)
+        bunch.yp(i, yp)
+        bunch.dE(i, dE)
+    return bunch
+
+
 class BunchCompare:
     """Class to compare two bunches."""
+
     def __init__(self, bunch1, bunch2):
         if isinstance(bunch1, Bunch):
             self.bunch1 = bunch1
-        elif type(bunch1) == str:  
+        elif type(bunch1) == str:
             self.bunch1 = Bunch()
             self.bunch1.readBunch(bunch1)
             print("Loading bunch {}".format(bunch1))
         if isinstance(bunch2, Bunch):
             self.bunch2 = bunch2
-        elif type(bunch2) == str:  
+        elif type(bunch2) == str:
             self.bunch2 = Bunch()
             self.bunch2.readBunch(bunch2)
             print("Loading bunch {}".format(bunch2))
@@ -51,13 +74,11 @@ class BunchCompare:
         self.coordlist = ["x", "xp", "y", "yp", "z", "dE"]
 
         self.mins = np.min(
-            np.vstack([np.min(self.coord1, axis=0), 
-                       np.min(self.coord1, axis=0)]),
+            np.vstack([np.min(self.coord1, axis=0), np.min(self.coord1, axis=0)]),
             axis=0,
         )
         self.mins = np.max(
-            np.vstack([np.max(self.coord1, axis=0), 
-                       np.max(self.coord1, axis=0)]),
+            np.vstack([np.max(self.coord1, axis=0), np.max(self.coord1, axis=0)]),
             axis=0,
         )
 
@@ -100,7 +121,6 @@ class BunchCompare:
 
 
 class BunchCalculator:
-
     def __init__(self, bunch, file=None):
         if isinstance(bunch, Bunch):
             self.bunch = bunch
@@ -116,17 +136,17 @@ class BunchCalculator:
         self.gamma = bunch.getSyncParticle().gamma()
         self.beta = bunch.getSyncParticle().beta()
         self.mass = bunch.getSyncParticle().mass()
-    
+
     def mean(self):
         """Return centroid in 6D phase space."""
         return np.mean(self.coords, axis=0)
 
-    def twiss(self, dim='x', dispersion_flag=0, emit_norm_flag=0):
+    def twiss(self, dim="x", dispersion_flag=0, emit_norm_flag=0):
         """Return rms 2D Twiss parameters."""
-        i = ['x', 'y', 'z'].index(dim)
+        i = ["x", "y", "z"].index(dim)
         alpha, beta = stats.twiss(self.cov, dim=dim)
         eps = stats.emittance(self.cov, dim=dim)
-        if emit_norm_flag and dim == 'z':
+        if emit_norm_flag and dim == "z":
             eps *= self.gamma**3 * self.beta
         disp = self.twiss_analysis.getDispersion(i)
         dispp = self.twiss_analysis.getDispersionDerivative(i)
@@ -137,16 +157,16 @@ class BunchCalculator:
             "disp": {"value": disp, "unit": "m"},
             "dispp": {"value": dispp, "unit": ""},
         }
-        
-    def norm_coords(self, dim='x'):
+
+    def norm_coords(self, dim="x"):
         """Return coordinates normalized by rms Twiss parameters in x-x', y-y', z-z'."""
         x, xp = np.zeros([2, self.bunch.getSize()])
         X = bunch_coord_array(self.bunch())
-                
+
         twiss = self.twiss(dim=dim, emit_norm_flag=1)
         alpha = twiss["alpha"]["value"]
         beta = twiss["beta"]["value"]
-        
+
         xn = x / np.sqrt(beta)
         xnp = alpha * x / np.sqrt(beta) + xp * np.sqrt(beta)
         return xn, xnp
@@ -157,10 +177,11 @@ class BunchCalculator:
 
 class BunchTracker:
     """Class to store beam evolution data.
-    
+
     dispersion_flag = 0; set to 1 to subtract dispersive term from emittances
     emit_norm_flag = 0; set to 1 fo calculate normalized emittances
     """
+
     def __init__(self, dispersion_flag=0, emit_norm_flag=0):
         self.twiss_analysis = BunchTwissAnalysis()
         self.dispersion_flag = dispersion_flag
@@ -175,13 +196,13 @@ class BunchTracker:
             "r99",
         ]
         # Add 2D alpha, beta, and emittance keys.
-        for dim in ['x', 'y', 'z']:
-            for name in ['alpha', 'beta', 'eps']:
-                hist_keys.append('{}_{}'.format(name, dim))
+        for dim in ["x", "y", "z"]:
+            for name in ["alpha", "beta", "eps"]:
+                hist_keys.append("{}_{}".format(name, dim))
         # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
         for i in range(6):
             for j in range(i + 1):
-                hist_keys.append('sig_{}{}'.format(j, i))
+                hist_keys.append("sig_{}{}".format(j, i))
         hist_init_len = 10000
         self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
         self.hist["node"] = []
@@ -202,8 +223,9 @@ class BunchTracker:
         nstep = params_dict["count"]
         npart = bunch.getSize()
         print(
-            "Step {}, Nparts {}, s={:.3f} m, node {}"
-            .format(nstep, npart, pos, node.getName())
+            "Step {}, Nparts {}, s={:.3f} m, node {}".format(
+                nstep, npart, pos, node.getName()
+            )
         )
 
         calc = BunchCalculator(bunch)
@@ -259,10 +281,10 @@ class BunchTracker:
         #     self.twiss_analysis.getTwiss(2)[1],
         #     self.twiss_analysis.getTwiss(2)[3] * 1.0e+6,
         # )
-        
+
         # Covariance matrix.
         Sigma = calc.cov
-        
+
         # -- compute 90%, 99% extent
         r90 = dist.radial_extent(calc.coords[:, (0, 2)], 0.90) * 100.0  # [mm]
         r99 = dist.radial_extent(calc.coords[:, (0, 2)], 0.99) * 100.0  # [mm]
@@ -288,7 +310,7 @@ class BunchTracker:
         self.hist["eps_z"][params_dict["count"]] = eps_z
         for i in range(6):
             for j in range(i + 1):
-                self.hist['sig_{}{}'.format(j, i)][params_dict['count']] = Sigma[j, i]
+                self.hist["sig_{}{}".format(j, i)][params_dict["count"]] = Sigma[j, i]
         self.hist["r90"][params_dict["count"]] = r90
         self.hist["r99"][params_dict["count"]] = r99
         self.hist["nlost"][params_dict["count"]] = self.hist["nparts"][0] - nparts
@@ -301,12 +323,12 @@ class BunchTracker:
         # Trim zeros from history.
         ind = np.where(self.hist["sig_11"] == 0)[0][1]
         for key, arr in self.hist.iteritems():
-            istart = 0 if key == 'node' else 1
+            istart = 0 if key == "node" else 1
             self.hist[key] = arr[istart:ind]
 
-    def write_hist(self, filename=None, sep=' '):
+    def write_hist(self, filename=None, sep=" "):
         """Save history data.
-        
+
         filename = location to save data
         """
         if filename is None:
@@ -320,9 +342,10 @@ class BunchTracker:
 
 class SingleParticleTracker:
     """This class holds array with beam evolution data.
-    
+
     Copy of BunchTracker class modified for single-particle tracking (no twiss/size data)
     """
+
     def __init__(self):
         hist_keys = ["s", "nparts", "x", "xp", "y", "yp", "z", "dE"]
         hist_init_len = 10000
@@ -382,7 +405,7 @@ class SingleParticleTracker:
 
     def write_hist(self, **kwargs):
         """Save history data.
-        
+
         optional argument:
         filename = location to save data
         """
@@ -432,6 +455,7 @@ class Beamlet:
     dEwidth = 0.4 keV (~energy slit resolution
 
     """
+
     def __init__(self, bunch_in, z2phase, **kwargs):
         self.z2phase = z2phase
         self.bunch_in = bunch_in
@@ -539,7 +563,7 @@ class Beamlet:
 
 class AdaptiveWeighting:
     """Dynamic macro-particle weight adjustment."""
-    
+
     def __init__(self, z2phase, macrosize0):
         self.z2phase = z2phase
         self.macrosize0 = macrosize0
@@ -585,8 +609,9 @@ class AdaptiveWeighting:
     def action_exit(self, params_dict):
         self.action_entrance()
 
-        
+
 class Plotter:
-    
-    def __init__(self, ):
+    def __init__(
+        self,
+    ):
         return

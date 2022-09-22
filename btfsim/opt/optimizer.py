@@ -1,9 +1,12 @@
-from scipy.optimize import minimize
-import btfsim.sim.simulation_main as main
-from btfsim.lattice.btf_quad_func_factory import BTF_QuadFunctionFactory as quadfunc
-from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQuads_Nodes
+from __future__ import print_function
+
 import numpy as np
-import matplotlib.pyplot as plt
+from scipy.optimize import minimize
+
+from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQuads_Nodes
+
+import btfsim.sim.simulation_main as main
+from btfsim.lattice.btf_quad_func_factory import btf_quad_func_factory as quadfunc
 
 
 class Matcher:
@@ -504,15 +507,4 @@ class PeriodicMatcher:
             i += 1
 
         print("N iteration = %i" % i)
-        if plotFlag:
-            plt.subplot(221)
-            plt.plot(twiss_hist[:, 0], ".-")
-            plt.subplot(222)
-            plt.plot(twiss_hist[:, 1], ".-")
-            plt.subplot(223)
-            plt.plot(twiss_hist[:, 2], ".-")
-            plt.subplot(224)
-            plt.plot(twiss_hist[:, 3], ".-")
-            plt.show()
-
         return twiss0
