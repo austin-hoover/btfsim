@@ -2,24 +2,35 @@ from __future__ import print_function
 import sys
 import os
 import time
+
 import numpy as np
 
-from bunch import Bunch, BunchTwissAnalysis
-from spacecharge import SpaceChargeCalcUnifEllipse, SpaceChargeCalc3D
-from orbit.bunch_generators import TwissContainer, TwissAnalysis
-from orbit.bunch_generators import KVDist1D, KVDist2D, KVDist3D
-from orbit.bunch_generators import GaussDist1D, GaussDist2D, GaussDist3D
-from orbit.bunch_generators import WaterBagDist1D, WaterBagDist2D, WaterBagDist3D
+from bunch import Bunch
+from bunch import BunchTwissAnalysis
+from spacecharge import SpaceChargeCalcUnifEllipse
+from spacecharge import SpaceChargeCalc3D
+from orbit.bunch_generators import TwissContainer
+from orbit.bunch_generators import TwissAnalysis
+from orbit.bunch_generators import KVDist1D
+from orbit.bunch_generators import KVDist2D
+from orbit.bunch_generators import KVDist3D
+from orbit.bunch_generators import GaussDist1D
+from orbit.bunch_generators import GaussDist2D
+from orbit.bunch_generators import GaussDist3D
+from orbit.bunch_generators import WaterBagDist1D
+from orbit.bunch_generators import WaterBagDist2D
+from orbit.bunch_generators import WaterBagDist3D
 from orbit.lattice import AccActionsContainer
 from orbit.py_linac.lattice_modifications import Add_quad_apertures_to_lattice
 from orbit.py_linac.lattice_modifications import Add_bend_apertures_to_lattice
 from orbit.py_linac.lattice_modifications import Add_drift_apertures_to_lattice
-from orbit.space_charge.sc3d import setSC3DAccNodes, setUniformEllipsesSCAccNodes
+from orbit.space_charge.sc3d import setSC3DAccNodes
+from orbit.space_charge.sc3d import setUniformEllipsesSCAccNodes
 import orbit.utils.consts as consts
 
 import btfsim.bunch.btf_linac_bunch_generator as gen_bunch
 import btfsim.bunch.utils as butils
-import btfsim.lattice.lattice_factory as gen_lattice
+from btfsim.lattice import lattice_factory
 from btfsim.util.default import Default
 
 
@@ -274,95 +285,73 @@ class Sim:
             coef_filename=coef_filename,
         )
         if mstatename:
-            self.change_quads(filename=mstatename, units=units)
+            self.update_quads(filename=mstatename, units=units)
         if mdict:
-            self.change_quads(dict=mdict, units=units)
+            self.update_quads(spdict=mdict, units=units)
         self.lattice = self.latgen.lattice
 
-    def change_quads(self, **kwargs):
+    def update_quads(self, filename=None, units='Amps', **spdict):
         """Change lattice quadrupole strengths.
         
         Can either import new xml lattice or update quads in existing lattice.
         """
-        # -- if filename is passed,
-        filename = kwargs.pop("filename", None)
-        thisdict = kwargs.pop("dict", [])
-        
-        # Set units for quad values: current [Amps] or GL [Tesla].
-        units = kwargs.pop("units", "Amps") 
-
-        # Set quads according to mstate file.
-        if filename:
-            # if filename[-6:] == 'mstate':
+        if filename is not None:
             self.latgen.load_quads(filename=filename, units=units)
-            # if loaded from mstate, units are in Tesla by default, no need to specify
-
-        # Set quads according to dict.
-        if thisdict:
-            self.latgen.update_quads(dict=thisdict, units=units)
-
-        # Assume any remaining named arguments are quad:current pairs.
-        for quad, current in kwargs.items():
-            self.latgen.update_quads(dict={quad: current}, units=units)
-
-        # Update the lattice model.
+        self.latgen.update_quads(units=units, **spdict)
         self.lattice = self.latgen.lattice
 
-    def init_sc_nodes(self, minlen=0.015, solver="ellipse", nellipse=1, 
+    def init_sc_nodes(self, min_dist=0.015, solver='fft', n_ellipsoid=1, 
                       gridmult=6, n_bunches=None):
-        """Set up space charge nodes.
+        """Initialize space charge nodes.
 
-        minlen = 0.015
-        solver = 'ellipse' (default) or 'fft'
-        nellipse = 1 (number of ellipses, only relevant if solver=ellipse)
-        gridmult = 6 (size of grid = 2**gridmult. only relevant if solver=fft)
-        n_bunches = None (number of neighboring bunches to include in calculation)
-                    If None, a single bunch is modelled using "normal" Grid3D solver
-                    If =0, a single bunch is modelled using new Grid3D with periodic boundary
-                    If >0, n_bunches are modeled (odd numbers round up to even. Can only
-                    model an even number of neighboring bunches)
-                    Right now new Grid3D only available on andrei's version of py-orbit
+        min_dist : float
+            Minimum distance between nodes [m].
+        solver : {'ellipsoid', 'fft'}
+            Type of space charge solver.
+        n_ellipsoid : int
+            Number of ellipsoids (if using 'ellipsoid' solver).
+        gridmult : int
+            Size of grid is 2**gridmult (if using 'fft' solver).
+        n_bunches : int (even)
+            Number of neighboring bunches to include in calculation. If None, a 
+            single bunch is modeled using the normal Grid3D solver. If 0, a 
+            single bunch is modeled using a new Grid3D with periodic boundary
+            conditions. If > 0, `n_bunches` are modeled. (Odd numbers round up to 
+            even; can only model an even number of neighboring bunches.)
         """
-        sc_path_length_min = minlen
-        sc_solver = solver
-        nellipse = int(nellipse)
+        print("Initializing space charge nodes...")
+        n_ellipsoid = int(n_ellipsoid)
         gridmult = int(gridmult)
-
-        print("Set up Space Charge nodes. ")
-        if sc_solver == "ellipse":
+        if solver == 'ellipsoid':
             # Uniformly charged ellipsoid space charge solver. The more ellipsoids
             # are used, the more accurate of space charge calculation. This 
             # ellipse method can be used for the initial estimate because it
             # is faster than the FFT method.
-            calcUnifEllips = SpaceChargeCalcUnifEllipse(nellipse)
-            space_charge_nodes = setUniformEllipsesSCAccNodes(
-                self.latgen.lattice, sc_path_length_min, calcUnifEllips
-            )
+            calc = SpaceChargeCalcUnifEllipse(n_ellipsoid)
+            space_charge_nodes = setUniformEllipsesSCAccNodes(self.latgen.lattice, min_dist, calc)
         else:
             # 3D FFT space charge solver. The number of macro-particles 
             # should be increased by m**3 when the grid resolution increases
             # by factor m.
             size_x = size_y = size_z = 2**gridmult
-            calc3d = SpaceChargeCalc3D(size_x, size_y, size_z)
+            calc = SpaceChargeCalc3D(size_x, size_y, size_z)
             if n_bunches:
-                calc3d.numExtBunches(n_bunches)
-                calc3d.freqOfBunches(self.freq)
-            space_charge_nodes = setSC3DAccNodes(
-                self.latgen.lattice, sc_path_length_min, calc3d)
-
+                calc.numExtBunches(n_bunches)
+                calc.freqOfBunches(self.freq)
+            space_charge_nodes = setSC3DAccNodes(self.latgen.lattice, min_dist, calc)
         max_sc_length = 0.0
         min_sc_length = self.latgen.lattice.getLength()
         for sc_node in space_charge_nodes:
-            scL = sc_node.getLengthOfSC()
-            if scL > max_sc_length:
-                max_sc_length = scL
-            if scL < min_sc_length:
-                min_sc_length = scL
-
+            if sc_node.getLengthOfSC() > max_sc_length:
+                max_sc_length = scl
+            if sc_node.getLengthOfSC() < min_sc_length:
+                min_sc_length = scl
         self.lattice = self.latgen.lattice
         self.scnodes = space_charge_nodes
+        print('Space charge nodes initialized.')
 
     def init_apertures(self, aprt_pipe_diameter=0.04):
+        """Initialize apertures."""
         aprtNodes = Add_quad_apertures_to_lattice(self.latgen.lattice)
         aprtNodes = Add_bend_apertures_to_lattice(
             self.latgen.lattice, aprtNodes, step=0.1
@@ -385,22 +374,15 @@ class Sim:
         print("===== Aperture Nodes Added =======")
 
     def init_single_particle(self, x=0.0, xp=0.0, y=0.0, yp=0.0, z=0.0, dE=0.0):
-        """Initialize bunch with one particle. ([m], [rad], [MeV])."""
-        # Convert to [m], [rad], [GeV].
-        x0 = x * 1e-3
-        y0 = y * 1e-3
-        xp0 = xp * 1e-3
-        yp0 = yp * 1e-3
-        z0 = z * 1e-3
-        dE0 = dE * 1e-3
+        """Initialize bunch with one particle."""
         self.bunch_in = Bunch()
         self.bunch_in.charge(self.charge)
-        self.bunch_in.addParticle(x0, xp0, y0, yp0, z0, dE0)
+        self.bunch_in.addParticle(x, xp, y, yp, z, dE)
         self.bunch_in.getSyncParticle().kinEnergy(self.ekin)
         self.bunch_in.macroSize(1)
         self.z2phase = 1.0  # dummy coefficient for z to phase (fix this)
         nparts = self.bunch_in.getSize()
-        print("Bunch Generation completed with {} macroparticles.".format(nparts))
+        print('Generated single-particle bunch.')
 
     def init_bunch(
         self, 

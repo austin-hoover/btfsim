@@ -20,6 +20,8 @@ class LatticeGenerator(mutils.MagnetConverter):
     ----------
     lattice : orbit.lattice.AccLattice
         The PyORBIT accelerator lattice instance.
+    magnets : dict
+        Quadrupole magnet names and strengths.
     """
     def __init__(
         self,
@@ -76,110 +78,65 @@ class LatticeGenerator(mutils.MagnetConverter):
 
         # Make dictionary of quads.
         quads = self.lattice.getQuads()
-        self.magdict = OrderedDict()
+        self.magnets = OrderedDict()
         for quad in quads:
             qname = quad.getName().split(":")[1]  # split off beamline name
-            self.magdict[qname] = {}  # initialize sub-dictionary
-            self.magdict[qname]["Node"] = quad
-            GL = (
-                -quad.getParam("dB/dr") * quad.getLength()
-            )  # convention: focusing quad has + GL
+            self.magnets[qname] = dict()  # initialize sub-dictionary
+            self.magnets[qname]["Node"] = quad
+            # By convention, focusing quad has GL > 0, QV02 is always positive.
+            GL = -quad.getParam("dB/dr") * quad.getLength()
             if qname == "QV02":
-                GL = -GL  # QV02 polarity is always positive.
-            # record coefficients and current if applicable
-            # (FODO quads do not have set current and are caught by try loop)
+                GL = -GL 
+            # Record coefficients and current if applicable (FODO quads do not have 
+            # set current and are caught by try loop.)
             try:
-                self.magdict[qname]["coeff"] = self.coeff[qname]
-                self.magdict[qname]["current"] = self.gl2c(qname, GL)
-            except:  # catch quads that do not have PV names
-                if "FQ" in qname:  # catch FODO PMQs
-                    self.magdict[qname]["coeff"] = [0, 0]
-                    self.magdict[qname]["current"] = 0
-                else:  # ignore other elements (not sure what these could be... probably nothing)
+                self.magnets[qname]["coeff"] = self.coeff[qname]
+                self.magnets[qname]["current"] = self.gl2c(qname, GL)
+            except:  
+                # Catch quads that do not have PV names.
+                if "FQ" in qname:  # FODO PMQs
+                    self.magnets[qname]["coeff"] = [0, 0]
+                    self.magnets[qname]["current"] = 0
+                else:  
+                    # Ignore other elements (not sure what these could be... probably nothing).
                     continue
-        print(
-            "Lattice generation completed! L={:.3f} m".format(self.lattice.getLength())
-        )
+        print("Lattice generation completed! L={:.3f} m"
+              .format(self.lattice.getLength()))
 
-    def update_quads(self, **kwargs):
+    def update_quads(self, units='Amps', **spdict):
         """Update quadrupole gradients in lattice definition.
-
-        Input is key-value pairs. Key is quadrupole name (ie, QH01), value is current.
-        Names should not include beamline name. (ie, refer to QH01, not MEBT:QH01)
-
-        Example:
-        >>> update_quads(QH01=10,QV04=-10) will change current for quads 1 and 4
-        >>> update_quads(dist=spdict) will change currents for all quads in dictionary
-        """
-        spdict = kwargs.pop("dict", [])
-        units = kwargs.pop("units", "Amps")
-        print('spdict:', spdict)
-
-        # -- change gradient for dictionary input
-        for key in spdict:
-            elementname = key
+        
+        **spdict : dict
+            Keys are quadrupole names; values are currents. Names should not include
+            beamline name ('QH01' instead of 'MEBT1:QH01'). 
+        """        
+        for element_name, value in spdict.items():
             if units == "Amps":
-                GL = self.c2gl(elementname, float(spdict[key]))
-                newcurrent = float(spdict[key])
-            elif units == "Tesla":
-                GL = float(spdict[key])
-                newcurrent = self.gl2c(elementname, float(spdict[key]))
-            else:
-                raise (
-                    TypeError,
-                    "Do not understand unit %s for quadrupole setting" % units,
-                )
-            try:
-                # -- update current
-                self.magdict[elementname]["current"] = newcurrent
-                # -- update gradient in node definition
-                newkappa = (
-                    -GL / self.magdict[elementname]["Node"].getLength()
-                )  # convention: focusing quad has + GL
-                if elementname == "QV02":
-                    newkappa = (
-                        -newkappa
-                    )  # special treatment for QV02 poliarty. Kappa + current, GL are always positive
-                self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
-                print(
-                    "Changed %s to %.3f A (dB/dr=%.3f T/m, GL=%.3f T)"
-                    % (elementname, float(newcurrent), newkappa, GL)
-                )
-            except KeyError:
-                print("Element %s is not defined" % (elementname))
-
-        # -- change gradient for keyword input
-        for key, value in kwargs.items():
-            elementname = key
-            if units == "Amps":
-                GL = self.c2gl(elementname, float(value))
+                GL = self.c2gl(element_name, float(value))
                 newcurrent = float(value)
             elif units == "Tesla":
                 GL = float(value)
-                newcurrent = self.gl2c(elementname, float(value))
+                newcurrent = self.gl2c(element_name, float(value))
             else:
                 raise (
                     TypeError,
-                    "Do not understand unit %s for quadrupole setting" % units,
+                    "Do not understand unit {} for quadrupole setting".format(units),
                 )
             try:
-                # -- update current
-                self.magdict[elementname]["current"] = newcurrent
-                # -- update gradient in node definition
-                newkappa = (
-                    -GL / self.magdict[elementname]["Node"].getLength()
-                )  # convention: focusing quad has + GL
-                if elementname == "QV02":
-                    newkappa = (
-                        -newkappa
-                    )  # special treatment for QV02 poliarty. Kappa + current, GL are always positive
-                self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
+                self.magnets[element_name]["current"] = newcurrent
+                # Update gradient in node definition. By convention, the 
+                # focusing quad has GL > 0. (Special treatment for QV02 polarity: 
+                # kappa + current, GL are always positive.)
+                newkappa = -GL / self.magnets[element_name]["Node"].getLength()
+                if element_name == "QV02":
+                    newkappa = -newkappa
+                self.magnets[element_name]["Node"].setParam("dB/dr", newkappa)
                 print(
-                    "Changed %s to %.3f A (dB/dr=%.3f T/m, GL=%.3f T)"
-                    % (elementname, float(newcurrent), newkappa, GL)
+                    "Changed {} to {:.3f} [A] (dB/dr={:.3f} [T/m], GL={:.3f} [T])."
+                    .format(element_name, float(newcurrent), newkappa, GL)
                 )
             except KeyError:
-                print("Element %s is not in beamline" % (elementname))
+                print("Element {} is not defined.".format(element_name))
 
     def default_quads(self):
         """Load info stored in default quad settings file."""
@@ -187,23 +144,19 @@ class LatticeGenerator(mutils.MagnetConverter):
         default = Default()
         filename = os.path.join(default.homedir, default.defaultdict[key])
         spdict = util.file2dict(filename)
-        self.update_quads(dict=spdict)
+        self.update_quads(**spdict)
 
     def load_quads(self, filename, units="Tesla"):
-        # -- create setpointdict from mstate file
         if filename[-6:] == "mstate":
             if units == "Tesla":
                 spdict = mutils.loadQuadReadback(filename)
             elif units == "Amps":
                 spdict = mutils.load_quad_setpoint(filename)
-            # -- update quad values
-            self.update_quads(dict=spdict, units=units)
+            self.update_quads(units=units, **spdict)
         else:
-            raise NameError(
-                "Error loading file %s, expected extension .mstate" % filename
-            )
+            raise NameError("Error loading file {}, expected extension .mstate".format(filename))
 
-    def update_pmqs(self, **kwargs):
+    def update_pmqs(self, field='GL', **spdict):
         """Update quadrupole gradients in lattice definition.
 
         Input is key-value pairs. Key is quadrupole name (ie, FQ01), value is field GL [Tesla].
@@ -211,85 +164,42 @@ class LatticeGenerator(mutils.MagnetConverter):
         names should not include beamline name. (ie, refer to FQ01, not MEBT:FQ01)
 
         Example:
-        >>> update_quads(FQ01=20,FQ04=-20) will change field for PMQs 1 and 4
-        >>> update_quads(FQ01=20,FQ04=-20,field='GL') will do the same as above
-        >>> update_quads(FQ01=20,FQ04=-20,field='length') change lengths for PMQs 1 and 4
-        >>> update_quads(dist=spdict,field='GL') will change fields for all quads in dictionary
+        >>> update_quads(FQ01=20, FQ04=-20) will change field for PMQs 1 and 4
+        >>> update_quads(FQ01=20, FQ04=-20,field='GL') will do the same as above
+        >>> update_quads(FQ01=20, FQ04=-20,field='length') change lengths for PMQs 1 and 4
+        >>> update_quads(field='GL', **spdict) will change fields for all quads in dictionary
         where dictionary is key-value pair for field values of magnets
         """
-        # -- if input includes dictionary
-        spdict = kwargs.pop("dict", [])
-        field = kwargs.pop("field", "GL")
-
-        print(spdict)
-
-        # -- change gradient for dictionary input
-        for key in spdict:
-            elementname = key
-            if field == "GL":
-                newGL = float(spdict[key])
-                try:
-                    L = self.magdict[elementname]["Node"].getLength()
-                    newkappa = -newGL / L
-                    self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
-                    print(
-                        "Changed %s to GL = %.3f T (dB/dr=%.3f T/m, L=%.3f)"
-                        % (elementname, float(newGL), newkappa, L)
-                    )
-                except KeyError:
-                    print("Element %s is not defined" % (elementname))
-            elif field == "Length":
-                newL = float(spdict[key])
-                try:
-                    GL = (
-                        -self.magdict[elementname]["Node"].getParam("dB/dr")
-                        * self.magdict[elementname]["Node"].getLength()
-                    )
-                    self.magdict[elementname]["Node"].setLength(newL)
-                    # changing length but holding GL fixed changes effective strength kappa
-                    newkappa = -GL / self.magdict[elementname]["Node"].getLength()
-                    self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
-                    print(
-                        "Changed %s to L = %.3f m (dB/dr=%.3f T/m, GL=%.3f T)"
-                        % (elementname, float(newL), newkappa, GL)
-                    )
-                except KeyError:
-                    print("Element %s is not defined" % (elementname))
-            else:
-                raise (TypeError, "Do not understand field=%s for PMQ element" % field)
-
-        # -- change gradient for keyword input
-        for key, value in kwargs.items():
-            elementname = key
+        for element_name, value in spdict.items():
             if field == "GL":
                 newGL = float(value)
                 try:
-                    L = self.magdict[elementname]["Node"].getLength()
+                    L = self.magnets[element_name]["Node"].getLength()
                     newkappa = newGL / L  # convention: focusing quad has + GL
-                    self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
+                    self.magnets[element_name]["Node"].setParam("dB/dr", newkappa)
                     print(
                         "Changed %s to GL = %.3f T (dB/dr=%.3f T/m, L=%.3f)"
-                        % (elementname, float(newGL), newkappa, L)
+                        % (element_name, float(newGL), newkappa, L)
                     )
                 except KeyError:
-                    print("Element %s is not defined" % (elementname))
+                    print("Element %s is not defined" % (element_name))
             elif field == "Length":
                 newL = float(value)
                 try:
                     GL = (
-                        self.magdict[elementname]["Node"].getParam("dB/dr")
-                        * self.magdict[elementname]["Node"].getLength()
+                        self.magnets[element_name]["Node"].getParam("dB/dr")
+                        * self.magnets[element_name]["Node"].getLength()
                     )
-                    self.magdict[elementname]["Node"].setLength(newL)
+                    self.magnets[element_name]["Node"].setLength(newL)
                     # changing length but holding GL fixed changes effective strength kappa
-                    newkappa = GL / self.magdict[elementname]["Node"].getLength()
-                    self.magdict[elementname]["Node"].setParam("dB/dr", newkappa)
+                    newkappa = GL / self.magnets[element_name]["Node"].getLength()
+                    self.magnets[element_name]["Node"].setParam("dB/dr", newkappa)
                     print(
                         "Changed %s to L = %.3f m (dB/dr=%.3f T/m, GL=%.3f T)"
-                        % (elementname, float(newL), newkappa, GL)
+                        % (element_name, float(newL), newkappa, GL)
                     )
                 except KeyError:
-                    print("Element %s is not defined" % (elementname))
+                    print("Element %s is not defined" % (element_name))
             else:
                 raise (TypeError, "Do not understand field=%s for PMQ element" % field)
 
