@@ -2,7 +2,7 @@
 
 Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using [pyorbit](https://github.com/PyORBIT-Collaboration/py-orbit).
 
-Adapted from K. Ruisard's repo.
+Mostly copied/adapted from K. Ruisard's repo.
 
 * **./btfsim**: lattice/bunch generation, tracking, etc.
 * **./data**: small data files like lattice XML.
