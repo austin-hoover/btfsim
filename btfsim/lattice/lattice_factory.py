@@ -105,30 +105,15 @@ class LatticeGenerator(mutils.MagnetConverter):
         """Update quadrupole gradients in lattice definition.
 
         Input is key-value pairs. Key is quadrupole name (ie, QH01), value is current.
-
-        names should not include beamline name. (ie, refer to QH01, not MEBT:QH01)
-
-        Some ideas for keyword arguments that might be good to use:
-        beamline
-        QH01
-        QV02
-        QH03
-        QV04
-        QH05
-        QV06
-        QV07
-        QH08
-        QV09
+        Names should not include beamline name. (ie, refer to QH01, not MEBT:QH01)
 
         Example:
         >>> update_quads(QH01=10,QV04=-10) will change current for quads 1 and 4
         >>> update_quads(dist=spdict) will change currents for all quads in dictionary
         """
-        # -- if input includes dictionary
         spdict = kwargs.pop("dict", [])
         units = kwargs.pop("units", "Amps")
-
-        print(spdict)
+        print('spdict:', spdict)
 
         # -- change gradient for dictionary input
         for key in spdict:
