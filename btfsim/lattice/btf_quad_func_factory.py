@@ -6,6 +6,7 @@ Others are generated with quad's length and beam pipe diameter. These
 parameters for SNS with the specific quads' names. For your accelerator, you 
 should create your own factory.
 """
+from __future__ import print_function
 import sys
 import os
 import math
@@ -16,9 +17,9 @@ from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import PMQ_Tr
 
 
 def btf_quad_func_factory(quad):
-    """Generate Enge's Function for SNS quads. 
-    
-    For some of the quads in the SNS lattice we know the Enge's parameters. So, it 
+    """Generate Enge's Function for SNS quads.
+
+    For some of the quads in the SNS lattice we know the Enge's parameters. So, it
     is an SNS specific function.
     """
     name = quad.getName()

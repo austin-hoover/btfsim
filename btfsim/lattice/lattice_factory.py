@@ -1,3 +1,4 @@
+from __future__ import print_function
 import sys
 import os
 from collections import OrderedDict
@@ -12,7 +13,7 @@ import btfsim.util.utils as utils
 
 class LatticeGenerator(mutils.MagnetConverter):
     """Class to generate BTF lattice from XML file.
-    
+
     By default, loads lattice defined in '/data/lattice/BTF_lattice.xml'.
 
     Attributes
@@ -20,14 +21,19 @@ class LatticeGenerator(mutils.MagnetConverter):
     lattice : orbit.lattice.AccLattice
         The PyORBIT accelerator lattice instance.
     """
-    def __init__(self, xml=None, beamlines=["MEBT1", "MEBT2", "MEBT3"], maxdriftlen=0.012,
-                 coef_filename=None):
+    def __init__(
+        self,
+        xml=None,
+        beamlines=["MEBT1", "MEBT2", "MEBT3"],
+        maxdriftlen=0.012,
+        coef_filename=None,
+    ):
         """Constructor.
-        
+
         filename : str
             Path to the XML file.
         beamlines : list[str]
-            List of beamlines to include in the lattice construction. 
+            List of beamlines to include in the lattice construction.
         maxdriftlen : float
             Maximum drift length [m].
         coef_filename : str
@@ -45,29 +51,28 @@ class LatticeGenerator(mutils.MagnetConverter):
             "VT34b": 0.2,
             "VS06": 0.2,  # larger slit is 0.8 mm
         }
-        
+
         default = Default()
         defaultlatticeFileName = os.path.join(
-            default.defaultdict["HOMEDIR"], default.defaultdict["XML_FILE"])
+            default.defaultdict["HOMEDIR"], default.defaultdict["XML_FILE"]
+        )
 
         self.xml = xml
         if self.xml is None:
             self.xml = defaultlatticeFileName
         self.beamlines = beamlines
 
-        print('xml file:', self.xml)
-        print('beamlines:', self.beamlines)
+        print("xml file:", self.xml)
+        print("beamlines:", self.beamlines)
 
         super(LatticeGenerator, self).__init__(coef_filename=coef_filename)
 
         # Create the factory instance.
         btf_linac_factory = SNS_LinacLatticeFactory()
-        btf_linac_factory.setMaxDriftLength(maxdriftlen)  
+        btf_linac_factory.setMaxDriftLength(maxdriftlen)
 
         # Make lattice from XML file.
-        self.lattice = btf_linac_factory.getLinacAccLattice(
-            self.beamlines, self.xml
-        )
+        self.lattice = btf_linac_factory.getLinacAccLattice(self.beamlines, self.xml)
 
         # Make dictionary of quads.
         quads = self.lattice.getQuads()
@@ -92,11 +97,13 @@ class LatticeGenerator(mutils.MagnetConverter):
                     self.magdict[qname]["current"] = 0
                 else:  # ignore other elements (not sure what these could be... probably nothing)
                     continue
-        print("Lattice generation completed! L={:.3f} m".format(self.lattice.getLength()))
+        print(
+            "Lattice generation completed! L={:.3f} m".format(self.lattice.getLength())
+        )
 
     def update_quads(self, **kwargs):
         """Update quadrupole gradients in lattice definition.
-        
+
         Input is key-value pairs. Key is quadrupole name (ie, QH01), value is current.
 
         names should not include beamline name. (ie, refer to QH01, not MEBT:QH01)
@@ -213,7 +220,7 @@ class LatticeGenerator(mutils.MagnetConverter):
 
     def update_pmqs(self, **kwargs):
         """Update quadrupole gradients in lattice definition.
-        
+
         Input is key-value pairs. Key is quadrupole name (ie, FQ01), value is field GL [Tesla].
 
         names should not include beamline name. (ie, refer to FQ01, not MEBT:FQ01)
@@ -303,7 +310,7 @@ class LatticeGenerator(mutils.MagnetConverter):
 
     def add_slit(self, slit_name, pos=0.0, width=None):
         """Add a slit to the lattice.
-        
+
         slit_name : str
             The name of slit, e.g., 'MEBT:HZ04'.
         pos : float
@@ -335,15 +342,19 @@ class LatticeGenerator(mutils.MagnetConverter):
         # Create aperture node. In this call, pos is longitudinal position.
         slit_node = self.lattice.getNodeForName("MEBT:" + slit_name)
         apertureNode = LinacApertureNode(
-            shape, a, b, c=c, d=d, 
-            pos=slit_node.getPosition(), 
+            shape,
+            a,
+            b,
+            c=c,
+            d=d,
+            pos=slit_node.getPosition(),
             name=slit_name,
         )
-        
+
         # Add as child to slit marker node.
         apertureNode.setName(slit_node.getName() + ":Aprt")
         apertureNode.setSequence(slit_node.getSequence())
         slit_node.addChildNode(apertureNode, slit_node.ENTRANCE)
         print("Inserted {} at {:.3f} mm".format(slit_name, pos))
-        
+
         return apertureNode

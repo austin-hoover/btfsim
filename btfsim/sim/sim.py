@@ -19,7 +19,7 @@ import orbit.utils.consts as consts
 
 import btfsim.bunch.btf_linac_bunch_generator as gen_bunch
 import btfsim.bunch.utils as butils
-import btfsim.lattice.generate_btf_lattice as gen_lattice
+import btfsim.lattice.lattice_factory as gen_lattice
 from btfsim.util.default import Default
 
 
@@ -276,7 +276,7 @@ class Sim:
             xml = os.path.join(self.default.home, self.default.defaultdict["XML_FILE"])
         print('xml:', xml)
         
-        self.latgen = gen_lattice.LatticeGenerator(
+        self.latgen = lattice_factory.LatticeGenerator(
             xml=xml, 
             beamlines=beamlines, 
             maxdriftlen=maxdriftlen, 
@@ -393,7 +393,7 @@ class Sim:
         self.lattice = self.latgen.lattice
         print("===== Aperture Nodes Added =======")
 
-    def initSingleParticle(self, x=0.0, xp=0.0, y=0.0, yp=0.0, z=0.0, dE=0.0):
+    def init_single_particle(self, x=0.0, xp=0.0, y=0.0, yp=0.0, z=0.0, dE=0.0):
         """Initialize bunch with one particle. ([m], [rad], [MeV])."""
         # Convert to [m], [rad], [GeV].
         x0 = x * 1e-3
@@ -411,8 +411,16 @@ class Sim:
         nparts = self.bunch_in.getSize()
         print("Bunch Generation completed with {} macroparticles.".format(nparts))
 
-    def init_bunch(self, **kwargs):
-        """Initialize bunch from Twiss parameters or sampling of phase space distribution.
+    def init_bunch(
+        self, 
+        bunch_generator='twiss', 
+        center=True, 
+        twiss=None,
+        bunch_filename=None,
+        bunch_file_format='pyorbit',
+        **kwargs
+    ):
+        """Initialize simulation bunch.
 
         Only sampling of 2 independent phase spaces x-x' and y-y' is implemented. 
         Default is 200k particles, 40 mA peak, 3D waterbag distribution with 
@@ -420,114 +428,103 @@ class Sim:
 
         Parameters
         ----------
-        gen = 'twiss' {also: '2d' or 'load'}
-        dist = 'waterbag' {also: 'kv' or 'gaussian'}
-        threshold = 1e-6
+        bunch_generator : str
+            Options are {'twiss', 'load', 'twiss', '2d', '2dx3', '2d+E'}.
+            if gen=="twiss", need to define all arguments ax,bx,ex, etc or accept defaults above
+            if gen=="2d", need to supply arguments:
+                xfile = path to distribution map for x phase space
+                yfile = path to distribution map for y phase space
+                dist is used to determine 2D longitudinal distribution only
+                threshold is fractional threshold for provided emittance data
+            if gen=="2d+E", need to supply arguments:
+                xfile = path to distribution map for x phase space
+                yfile = path to distribution map for y phase space
+                efile = path to measurement of energy profile
+                dist is used to determine 1D phase distribution only
+                threshold is fractional threshold for provided emittance data
+            if gen=="2dx3", need to supply arguments:
+                xfile = path to distribution map for x phase space
+                yfile = path to distribution map for y phase space
+                zfile = path to measurement of energy profile
+                threshold is fractional threshold for emittance data
+            if gen=="load", need to supply arguments:
+                file = path to file containing macro particle distribution
+                fileformat = 'pyorbit' ('parmteq' is also an option)
+        dist : str
+            Distribution name (if generating from Twiss parameters). Options 
+            are {'waterbag', 'kv', 'gaussian'}.
+        threshold : float
+            1e-6
         cutoff = -1 {only used if dist=gaussian)
         current = 0.040 {A}
         nparts = 200,000 {not valid if gen=load}
-        centering = 1
-        ax = -1.9899
-        bx = 0.19636
-        ex = 0.160372
-        ay = 1.92893
-        by = 0.17778
-        ey = 0.16362
-        az = 0.
-        bz = 0.6
-        ez = 0.2
-
-        if gen=="twiss", need to define all arguments ax,bx,ex, etc or accept defaults above
-        if gen=="2d", need to supply arguments:
-            xfile = path to distribution map for x phase space
-            yfile = path to distribution map for y phase space
-            dist is used to determine 2D longitudinal distribution only
-            threshold is fractional threshold for provided emittance data
-        if gen=="2d+E", need to supply arguments:
-            xfile = path to distribution map for x phase space
-            yfile = path to distribution map for y phase space
-            efile = path to measurement of energy profile
-            dist is used to determine 1D phase distribution only
-            threshold is fractional threshold for provided emittance data
-        if gen=="2dx3", need to supply arguments:
-            xfile = path to distribution map for x phase space
-            yfile = path to distribution map for y phase space
-            zfile = path to measurement of energy profile
-            threshold is fractional threshold for emittance data
-        if gen=="load", need to supply arguments:
-            file = path to file containing macro particle distribution
-            fileformat = 'pyorbit' ('parmteq' is also an option)
-
-        Input Twiss params are normalized RMS value; emit: mm-mrad; beta: mm/mrad.
+        center : bool
+            Whether to center the bunch.
+        twiss : dict
+            Input Twiss parameters normalized RMS value; emit: mm-mrad; beta: mm/mrad.
         """
-        # options are twiss, 2dxy, 2d+E, 2dxyz (others to be added later)
-        bunchgenerator = kwargs.get("gen", "twiss") 
-        # -- check if valid option:
-        if not (bunchgenerator in ["load", "twiss", "2d", "2dx3", "2d+E"]):
+        if bunch_generator not in ['load', 'twiss', '2d', '2dx3', '2d+E']:
             raise KeyError(
-                "gen={} not valid. allowed generators: [ load, twiss , 2d , 2dx3 , 2d+E ]"
-                .format(bunchgenerator)
+                "bunch_generator={} not valid. allowed generators: ['load', 'twiss', '2d', '2dx3', '2d+E']"
+                .format(bunch_generator)
             )
-
-        # Decide whether to center the bunch coordinates (0 or 1).
-        centering = kwargs.get("centering", 1) 
-
-        # Default values of twiss params (not used if generating function does not call for them...)
-        alphaX = float(kwargs.get("ax", -1.9899))
-        betaX = float(kwargs.get("bx", 0.19636))
-        emitX = float(kwargs.get("ex", 0.160372))
-        alphaY = float(kwargs.get("ay", 1.92893))
-        betaY = float(kwargs.get("by", 0.17778))
-        emitY = float(kwargs.get("ey", 0.160362))
-        alphaZ = float(kwargs.get("az", 0.0))
-        betaZ = float(kwargs.get("bz", 0.6))
-        emitZ = float(kwargs.get("ez", 0.2))
+        # Default Twiss parameters (not used if generating function does not call for them...)
+        if twiss is None:
+            twiss = dict()
+        twiss.setdefault('alpha_x', -1.9899)
+        twiss.setdefault('beta_x', 0.19636)
+        twiss.setdefault('eps_x', 0.160372)
+        twiss.setdefault('alpha_y', 1.92893)
+        twiss.setdefault('beta_y', 0.17778)
+        twiss.setdefault('eps_y', 0.160362)
+        twiss.setdefault('alpha_z', 0.0)
+        twiss.setdefault('beta_z', 0.6)
+        twiss.setdefault('eps_z', 0.2)
 
         # Make emittances un-normalized XAL units [m*rad].
-        emitX = 1.0e-6 * emitX / (self.gamma * self.beta)
-        emitY = 1.0e-6 * emitY / (self.gamma * self.beta)
-        emitZ = 1.0e-6 * emitZ / (self.gamma**3 * self.beta)
+        twiss['eps_x'] = 1.0e-6 * twiss['eps_x'] / (self.gamma * self.beta)
+        twiss['eps_y'] = 1.0e-6 * twiss['eps_y'] / (self.gamma * self.beta)
+        twiss['eps_z'] = 1.0e-6 * twiss['eps_z'] / (self.gamma**3 * self.beta)
 
-        # Transform to pyORBIT emittance [GeV*m].
-        emitZ = emitZ * self.gamma**3 * self.beta**2 * self.mass
-        betaZ = betaZ / (self.gamma**3 * self.beta**2 * self.mass)
-        if bunchgenerator == "twiss":
+        # Transform to pyorbit emittance [GeV*m].
+        twiss['eps_z'] = twiss['eps_z'] * self.gamma**3 * self.beta**2 * self.mass
+        twiss['beta_z'] = twiss['beta_z'] / (self.gamma**3 * self.beta**2 * self.mass)
+        if bunch_generator == "twiss":
             print("========= PyORBIT Twiss ===========")
             print(
                 "alpha beta emitt[mm*mrad] X= %6.4f %6.4f %6.4f "
-                % (alphaX, betaX, emitX * 1.0e6)
+                % (alpha_x, beta_x, eps_x * 1.0e6)
             )
             print(
                 "alpha beta emitt[mm*mrad] Y= %6.4f %6.4f %6.4f "
-                % (alphaY, betaY, emitY * 1.0e6)
+                % (alpha_y, beta_y, eps_y * 1.0e6)
             )
-        if bunchgenerator in ["twiss", "2d", "2d+E"]:
+        if bunch_generator in ["twiss", "2d", "2d+E"]:
             print(
                 "alpha beta emitt[mm*MeV] Z= %6.4f %6.4f %6.4f "
-                % (alphaZ, betaZ, emitZ * 1.0e6)
+                % (alpha_z, beta_z, eps_z * 1.0e6)
             )
 
-        # Load bunch through file.
-        if bunchgenerator == "load":
-            defaultbunchfilename = (self.default.home + self.default.defaultdict["BUNCH_IN"])
-            bunchfilename = kwargs.get("file", defaultbunchfilename)
-            bunchfileformat = kwargs.get("fileformat", "pyorbit")            
-
-            # -- load bunch generator
+        if bunch_generator == "load":
+            if bunch_filename is None:
+                bunch_filename = os.path.join(
+                    self.default.home,
+                    self.default.defaultdict["BUNCH_IN"],
+                )
             bunch_gen = gen_bunch.Base_BunchGenerator()
 
             # -- generate bunch by reading in file w/  macroparticle coordinates
-            if not os.path.isfile(bunchfilename):
-                raise ValueError("Bunch file '{}' does not exist.".format(bunchfilename))
-            print("Reading in bunch from file %s..." % bunchfilename)
-            if bunchfileformat == "pyorbit":
+            if not os.path.isfile(bunch_filename):
+                raise ValueError("Bunch file '{}' does not exist.".format(bunch_filename))
+            print("Reading in bunch from file %s..." % bunch_filename)
+            if bunch_file_format == "pyorbit":
                 self.bunch_in = Bunch()
-                self.bunch_in.readBunch(bunchfilename)
-            elif bunchfileformat == "parmteq":
-                self.bunch_in = bunch_gen.read_parmteq_bunch(bunchfilename)
+                self.bunch_in.readBunch(bunch_filename)
+            elif bunch_file_format == "parmteq":
+                self.bunch_in = bunch_gen.read_parmteq_bunch(bunch_filename)
             else:
                 raise KeyError(
-                    "Do not recognize format %s for bunch file" % (bunchfileformat)
+                    "Do not recognize format %s for bunch file" % (bunch_file_format)
                 )
             # -- read in nparts and macrosize
             nparts = self.bunch_in.getSize()
@@ -547,26 +544,26 @@ class Sim:
             print("Bunch read completed. Imported %i macroparticles." % nparts)
 
         # Generate bunch by Twiss params or measured distributions.
-        if bunchgenerator in ["twiss", "2d", "2d+E", "2dx3"]:
+        if bunch_generator in ["twiss", "2d", "2d+E", "2dx3"]:
             nparts = kwargs.get("nparts", 200000)
             self.current = kwargs.get("current", 0.040)
             bunchdistributor = kwargs.get("dist", "gaussian") 
             cut_off = kwargs.get("cutoff", -1)
             distributor_class = None
             if bunchdistributor == "gaussian":
-                if bunchgenerator == "twiss":
+                if bunch_generator == "twiss":
                     distributor_class = GaussDist3D
-                elif bunchgenerator in ["2d", "2d+E"]:
+                elif bunch_generator in ["2d", "2d+E"]:
                     distributor_class = GaussDist1D
             elif bunchdistributor == "waterbag":
-                if bunchgenerator == "twiss":
+                if bunch_generator == "twiss":
                     distributor_class = WaterBagDist3D
-                elif bunchgenerator in ["2d", "2d+E"]:
+                elif bunch_generator in ["2d", "2d+E"]:
                     distributor_class = WaterBagDist1D
             elif bunchdistributor == "kv":
-                if bunchgenerator == "twiss":
+                if bunch_generator == "twiss":
                     distributor_class = KVDist3D
-                elif bunchgenerator in ["2d", "2d+E"]:
+                elif bunch_generator in ["2d", "2d+E"]:
                     distributor_class = KVDist1D
             else:
                 raise ValueError(
@@ -575,15 +572,15 @@ class Sim:
                 )
 
             # Make generator instances.
-            if bunchgenerator == "twiss":
-                twissX = TwissContainer(alphaX, betaX, emitX)
-                twissY = TwissContainer(alphaY, betaY, emitY)
-                twissZ = TwissContainer(alphaZ, betaZ, emitZ)
-                print("Generating bunch based off twiss parameters ( N = %i )" % nparts)
-                bunch_gen = gen_bunch.BTF_Linac_BunchGenerator(
-                    twissX,
-                    twissY,
-                    twissZ,
+            if bunch_generator == "twiss":
+                twiss_x = TwissContainer(alpha_x, beta_x, eps_x)
+                twiss_y = TwissContainer(alpha_y, beta_y, eps_y)
+                twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
+                print("Generating bunch based off twiss parameters (N = {})".format(nparts))
+                bunch_gen = gen_bunch.BTF_Linac_bunch_generator(
+                    twiss_x,
+                    twiss_y,
+                    twiss_z,
                     mass=self.mass,
                     charge=self.charge,
                     ekin=self.ekin,
@@ -591,7 +588,7 @@ class Sim:
                     freq=self.freq,
                 )
 
-            elif bunchgenerator in ["2d", "2d+E", "2dx3"]:
+            elif bunch_generator in ["2d", "2d+E", "2dx3"]:
                 xfilename = kwargs.get("xfile", "")
                 yfilename = kwargs.get("yfile", "")
                 sample_method = kwargs.get("sample", "cdf")
@@ -599,18 +596,18 @@ class Sim:
 
                 phaseSpGenX = gen_bunch.PhaseSpaceGen(xfilename, threshold=thres)
                 phaseSpGenY = gen_bunch.PhaseSpaceGen(yfilename, threshold=thres)
-                twissZ = TwissContainer(alphaZ, betaZ, emitZ)
+                twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
 
-                if bunchgenerator == "2d":
+                if bunch_generator == "2d":
 
                     print(
                         "Generating bunch based off 2d emittance measurements ( N = %i )"
                         % nparts
                     )
-                    bunch_gen = gen_bunch.BTF_Linac_TrPhaseSpace_BunchGenerator(
+                    bunch_gen = gen_bunch.BTF_Linac_TrPhaseSpace_bunch_generator(
                         phaseSpGenX,
                         phaseSpGenY,
-                        twissZ,
+                        twiss_z,
                         mass=self.mass,
                         charge=self.charge,
                         ekin=self.ekin,
@@ -619,12 +616,12 @@ class Sim:
                         method=sample_method,
                     )
 
-                elif bunchgenerator == "2d+E":
+                elif bunch_generator == "2d+E":
 
                     efilename = kwargs.get("efile", "")
                     phaseSpGenZ = gen_bunch.PhaseSpaceGenZPartial(
                         efilename,
-                        twissZ,
+                        twiss_z,
                         zdistributor=distributor_class,
                         cut_off=cut_off,
                     )
@@ -644,7 +641,7 @@ class Sim:
                         freq=self.freq,
                         method=sample_method,
                     )
-                elif bunchgenerator == "2dx3":
+                elif bunch_generator == "2dx3":
 
                     zfilename = kwargs.get("zfile", "")
                     phaseSpGenZ = gen_bunch.PhaseSpaceGen(zfilename, threshold=thres)
@@ -670,7 +667,7 @@ class Sim:
             bunch_gen.setKinEnergy(self.ekin)
 
             # -- generate bunch
-            self.bunch_in = bunch_gen.getBunch(
+            self.bunch_in = bunch_gen.get_bunch(
                 nParticles=int(nparts), 
                 distributor_class=distributor_class,
             )
@@ -682,7 +679,7 @@ class Sim:
             nparts = self.bunch_in.getSize()
             print("Bunch Generation completed with %i macroparticles." % nparts)
 
-        if centering:
+        if center:
             self.center_bunch()
 
     def center_bunch(self):

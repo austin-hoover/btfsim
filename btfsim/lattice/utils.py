@@ -1,4 +1,5 @@
 """Module to loading magnet states and convert magnet values."""
+from __future__ import print_function
 import os
 from collections import OrderedDict
 import numpy as np
@@ -11,17 +12,20 @@ from btfsim.util import utils
 
 class MagnetConverter(object):
     """Convert between gradient and current based on coefficients in file."""
+
     def __init__(self, coef_filename=None):
         self.coef_filename = coef_filename
         if self.coef_filename is None:
             default = Default()
-            self.coef_filename = os.path.join(default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"])
-        print('coef_filename:', self.coef_filename)
+            self.coef_filename = os.path.join(
+                default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"]
+            )
+        print("coef_filename:", self.coef_filename)
         self.coeff = utils.file_to_dict(self.coef_filename)
 
     def c2gl(self, quadname, scaledAI):
         """Convert current to gradient.
-        
+
         quadname : str
             Quadrupole name (i.e., 'QH01').
         scaledAI : float
@@ -34,15 +38,16 @@ class MagnetConverter(object):
             GL = A * scaledAI + B * scaledAI**2
         except KeyError:
             print(
-                "Do not know conversion factor for element {}; gradient value not assigned."
-                .format(quadname)
+                "Do not know conversion factor for element {}; gradient value not assigned.".format(
+                    quadname
+                )
             )
             GL = []
         return GL
 
     def gl2c(self, quadname, GL):
         """Convert gradient to current.
-        
+
         quadname : str
             Quadrupole name (i.e., 'QH01').
         GL : float
@@ -60,8 +65,9 @@ class MagnetConverter(object):
                 scaledAI = 0.5 * (A / B) * (-1 + np.sqrt(1 + 4 * GL * B / A**2))
         except KeyError:
             print(
-                "Do not know conversion factor for element {}; current set to zero."
-                .format(quadname)
+                "Do not know conversion factor for element {}; current set to zero.".format(
+                    quadname
+                )
             )
             scaledAI = 0
         return scaledAI
@@ -91,7 +97,7 @@ class MagnetConverter(object):
 # ------------------------------------------------------------------------------
 def load_quad_setpoint(filename):
     """Retrieve quadrupole setpoints [A] from .mstate file.
-    
+
     Returns dictionary matching quad name with current setpoint.
     """
     state_da = XmlDataAdaptor.adaptorForFile(filename)
@@ -107,7 +113,7 @@ def load_quad_setpoint(filename):
 
 def loadQuadReadback(filename):
     """Retrieve quadrupole readbacks [T] from .mstate file.
-    
+
     Returns dictionary matching quad name with field readback.
     """
     state_da = XmlDataAdaptor.adaptorForFile(filename)
