@@ -1,9 +1,10 @@
-"""Track bunch through the BTF lattice."""
+"""Generic script to track a bunch through the BTF."""
 from __future__ import print_function
 import sys
 import os
 import time
 from pathlib import Path
+
 import numpy as np
 
 from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQuads_Nodes
