@@ -38,9 +38,8 @@ class MagnetConverter(object):
             GL = A * scaledAI + B * scaledAI**2
         except KeyError:
             print(
-                "Do not know conversion factor for element {}; gradient value not assigned.".format(
-                    quadname
-                )
+                "Do not know conversion factor for element {}; gradient value not assigned."
+                .format(quadname)
             )
             GL = []
         return GL
@@ -65,9 +64,8 @@ class MagnetConverter(object):
                 scaledAI = 0.5 * (A / B) * (-1 + np.sqrt(1 + 4 * GL * B / A**2))
         except KeyError:
             print(
-                "Do not know conversion factor for element {}; current set to zero.".format(
-                    quadname
-                )
+                "Do not know conversion factor for element {}; current set to zero."
+                .format(quadname)
             )
             scaledAI = 0
         return scaledAI
