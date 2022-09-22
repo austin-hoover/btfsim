@@ -1,31 +1,25 @@
-#!/usr/bin/env python
+"""Quadrupole factory.
 
-# --------------------------------------------------------------
-# This is a Enge Function Factory specific for the SNS. Some
-# Enge's function parameters are found by fitting the measured or
-# calculated field distributions. Others are generated with quad's
-# length and beam pipe diameter.
-# These parameters for SNS with the specific quads' names.
-# For your accelerator you should create your own factory.
-# --------------------------------------------------------------
-
-import math
+This is a Enge Function Factory specific for the SNS. Some Enge's function 
+parameters are found by fitting the measured or calculated field distributions.
+Others are generated with quad's length and beam pipe diameter. These 
+parameters for SNS with the specific quads' names. For your accelerator, you 
+should create your own factory.
+"""
 import sys
 import os
+import math
 
 from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import EngeFunction
-from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import (
-    SimpleQuadFieldFunc,
-)
-from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import (
-    PMQ_Trace3D_Function,
-)
+from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import SimpleQuadFieldFunc
+from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import PMQ_Trace3D_Function
 
 
-def BTF_QuadFunctionFactory(quad):
-    """
-    It generates the Enge's Function for SNS quads. For some of the quads in the SNS
-    lattice we know the Enge's parameters. So, it is a SNS specific function.
+def btf_quad_func_factory(quad):
+    """Generate Enge's Function for SNS quads. 
+    
+    For some of the quads in the SNS lattice we know the Enge's parameters. So, it 
+    is an SNS specific function.
     """
     name = quad.getName()
     if name in ["MEBT:QV02"]:

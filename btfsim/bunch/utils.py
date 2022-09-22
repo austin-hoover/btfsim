@@ -30,6 +30,27 @@ def bunch_coord_array(bunch):
     return X
 
 
+def cov(bunch):
+    """Return 6x6 covariance matrix."""
+    return np.cov(bunch_coord_array(bunch).T)
+
+
+def decorrelate_x_y_z(bunch):
+    """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
+    X = bunch_coord_array(bunch)
+    for i in (0, 2, 4):
+        idx = np.random.permutation(np.arange(X.shape[0]))
+        X[:, i:i+2] = X[idx, i:i+2]
+    for i, (x, xp, y, yp, z, dE) in enumerate(X):
+        bunch.x(i, x)
+        bunch.y(i, y)
+        bunch.z(i, z)
+        bunch.xp(i, xp)
+        bunch.yp(i, yp)
+        bunch.dE(i, dE)
+    return bunch
+
+
 class BunchCompare:
     """Class to compare two bunches."""
     def __init__(self, bunch1, bunch2):
