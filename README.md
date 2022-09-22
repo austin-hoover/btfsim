@@ -1,4 +1,4 @@
-# btf-simulation
+# btfsim
 
 Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using [pyorbit](https://github.com/PyORBIT-Collaboration/py-orbit).
 
