@@ -78,8 +78,8 @@ n_bunches = 3  # number of bunches to model
 # Initialize simulation
 # ------------------------------------------------------------------------------
 _base = '{}-{}-{}-{}'.format(timestamp, script_name, start, stop)
-fio['out']['bunch'] = _base + '_bunch_{}.dat'.format(stop)
-fio['out']['history'] = os.path.join(outdir, _base + '_history.dat')
+fio['out']['bunch'] = _base + '-bunch-{}.dat'.format(stop)
+fio['out']['history'] = os.path.join(outdir, _base + '-history.dat')
 
 sim = Sim(outdir=outdir)
 sim.dispersion_flag = int(dispersion_flag)
@@ -100,7 +100,7 @@ sim.init_lattice(
 if switches['bunch_monitors']:
     for node in sim.lattice.getNodes():
         if node.getName() in ['MEBT:QH01', 'MEBT:QV02', 'MEBT:QH03', 'MEBT:QV04']:
-            filename = os.path.join(outdir, _base + '_bunch_{}.dat'.format(node.getName()))
+            filename = os.path.join(outdir, _base + '-bunch-{}.dat'.format(node.getName()))
             bunch_monitor_node = diagnostics.BunchMonitorNode(filename=filename)
             node.addChildNode(bunch_monitor_node, node.ENTRANCE)
 for node in sim.lattice.getNodes():
@@ -131,7 +131,7 @@ sim.shift_bunch(x0=x0, y0=y0, xp0=xp0, yp0=yp0)
 # Run simulation
 # ------------------------------------------------------------------------------
 if switches['save_init_bunch']:
-    sim.dump_bunch(os.path.join(outdir, _base + '_bunch_init.dat'))
+    sim.dump_bunch(os.path.join(outdir, _base + '-bunch-init.dat'))
 
 def process_start_stop_arg(arg):
     return "MEBT:{}".format(arg) if type(arg) is str else arg
