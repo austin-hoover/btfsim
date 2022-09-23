@@ -1,9 +1,9 @@
-"""Generic script to track a bunch through the BTF."""
 from __future__ import print_function
 import sys
 import os
 import time
 from pathlib import Path
+from pprint import pprint
 
 import numpy as np
 
@@ -11,7 +11,7 @@ from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQua
 
 from btfsim.lattice import diagnostics
 from btfsim.lattice.btf_quad_func_factory import btf_quad_func_factory
-import btfsim.sim.simulation_main as main
+from btfsim.sim.sim import Sim
 import btfsim.bunch.utils as butils
 
 
@@ -20,7 +20,6 @@ import btfsim.bunch.utils as butils
 start = 0  # start node (name or index)
 stop = 'HZ04'  # stop node (name or index)
 switches = {
-    'overlapping_pmq': True,  # use overlapping PMQ field model
     'space_charge': True,  # toggle space charge calculation
     'decorrelate': False,  # decorrelate inital bunch
     'bunch_monitors': False  # bunch monitor nodes within lattice
@@ -65,11 +64,19 @@ _base = '{}-{}-{}-{}'.format(timestamp, script_name, start, stop)
 fio['out']['bunch'] = _base + '_bunch_{}.dat'.format(stop)
 fio['out']['history'] = os.path.join(outdir, _base + '_history.dat')
 
-sim = main.Sim(outdir=outdir)
+sim = Sim(outdir=outdir)
 sim.dispersion_flag = int(dispersion_flag)
-sim.init_lattice(beamlines=["MEBT1", "MEBT2", "MEBT3"], mstatename=fio['in']['mstate'])
+sim.init_lattice(
+    beamlines=['MEBT1'], 
+    mstatename=fio['in']['mstate'],
+)
 
-# Add bunch monitor nodes at each of the first four quads.
+quad_ids = ['QH01', 'QV02', 'QH03', 'QV04']
+for quad_id in quad_ids:
+    current = sim.latgen.magnets[quad_id]['current']
+    spdict = {quad_id: 0.0}
+    sim.update_quads(units='Amps', **spdict)
+    
 if switches['bunch_monitors']:
     for node in sim.lattice.getNodes():
         if node.getName() in ['MEBT:QH01', 'MEBT:QV02', 'MEBT:QH03', 'MEBT:QV04']:
@@ -78,23 +85,6 @@ if switches['bunch_monitors']:
             node.addChildNode(bunch_monitor_node, node.ENTRANCE)
 for node in sim.lattice.getNodes():
     print(node.getName(), node.getPosition())
-    
-# Overlapping nodes: replace quads with analytic model. (Must come after 
-# `lattice.init()` but before `lattice.init_sc_nodes()`.)
-if switches['overlapping_pmq']:
-    z_step = 0.001
-    quad_names = []  # Leaving this empty will replace every quad.
-    for j in range(n_pmq):
-        pmq_id = j + 1 + 13
-        qname = 'MEBT:FQ{:02.0f}'.format(pmq_id)
-        quad_names.append(qname)
-        Replace_Quads_to_OverlappingQuads_Nodes(
-            sim.lattice,
-            z_step, 
-            accSeq_Names=["MEBT3"], 
-            quad_Names=quad_names, 
-            EngeFunctionFactory=btf_quad_func_factory,
-        )
     
 if switches['space_charge']:
     sim.init_sc_nodes(min_dist=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunches)
