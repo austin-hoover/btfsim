@@ -42,14 +42,15 @@ if not os.path.isdir(outdir):
 revision_hash = utils.git_revision_hash()
 repo_url = utils.git_url()
 if revision_hash and repo_url:
-    file = open('{}-{}-git_hash.txt'.format(timestamp, script_name), 'w')
+    _filename = '{}-{}-git_hash.txt'.format(timestamp, script_name)
+    file = open(os.path.join(outdir, _filename), 'w')
     file.write('{}/-/tree/{}'.format(repo_url, revision_hash))
     file.close()
     
 # Save time-stamped copy of this file.
 shutil.copy(
     __file__, 
-    os.path.join(outdir, '{}-{}'.format(timestamp, __file__))
+    os.path.join(outdir, '{}-{}.py'.format(timestamp, script_name))
 )
 
 # Lattice
