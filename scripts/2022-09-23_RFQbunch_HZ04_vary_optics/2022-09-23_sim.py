@@ -89,7 +89,11 @@ for node in sim.lattice.getNodes():
 if switches['space_charge']:
     sim.init_sc_nodes(min_dist=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunches)
     
-sim.init_bunch(gen="load", file=os.path.join(os.getcwd(), fio['in']['bunch']))
+sim.init_bunch(
+    gen_type='load', 
+    bunch_filename=os.path.join(os.getcwd(), fio['in']['bunch']),
+    bunch_file_format='pyorbit',
+)
 
 if switches['decorrelate']:
     print('Initial covariance matrix:')

@@ -28,7 +28,7 @@ from orbit.space_charge.sc3d import setSC3DAccNodes
 from orbit.space_charge.sc3d import setUniformEllipsesSCAccNodes
 import orbit.utils.consts as consts
 
-import btfsim.bunch.btf_linac_bunch_generator as gen_bunch
+import btfsim.bunch.btf_linac_bunch_generator as bg
 import btfsim.bunch.utils as butils
 from btfsim.lattice import lattice_factory
 from btfsim.util.default import Default
@@ -218,7 +218,7 @@ class Sim:
         self.lattice = self.latgen.lattice
 
         # Reverse the bunch coordinates.
-        gen_bunch.bunch_transformer_func(self.bunch_in)
+        bg.bunch_transformer_func(self.bunch_in)
 
         # Run in reverse (start <==> stop). Do not auto-save output bunch; the bunch
         # coordinates need to be reversed first.
@@ -229,12 +229,12 @@ class Sim:
         self.lattice = self.latgen.lattice
 
         # Un-reverse the bunch coordinates, then save them.
-        gen_bunch.BunchTransformerFunc(self.bunch_track)
+        bg.BunchTransformerFunc(self.bunch_track)
         if out:
             self.bunch_track.dumpBunch(output_filename)
 
         # Also un-reverse the initial bunch coordinates.
-        gen_bunch.BunchTransformerFunc(self.bunch_in)
+        bg.BunchTransformerFunc(self.bunch_in)
 
         # Wrap up.
         if type(stop) in [float, int]:
@@ -374,17 +374,25 @@ class Sim:
         self.bunch_in.getSyncParticle().kinEnergy(self.ekin)
         self.bunch_in.macroSize(1)
         self.z2phase = 1.0  # dummy coefficient for z to phase (fix this)
-        nparts = self.bunch_in.getSize()
+        n_parts = self.bunch_in.getSize()
         print('Generated single-particle bunch.')
 
     def init_bunch(
         self, 
-        bunch_generator='twiss', 
+        gen_type='twiss', 
+        dist='waterbag',
         center=True, 
         twiss=None,
         bunch_filename=None,
         bunch_file_format='pyorbit',
-        **kwargs
+        n_parts=200000,
+        current=0.040,
+        cut_off=-1,
+        xfilename='',
+        yfilename='',
+        zfilename='',
+        sample_method='cdf',
+        thresh=1e-6,
     ):
         """Initialize simulation bunch.
 
@@ -394,7 +402,7 @@ class Sim:
 
         Parameters
         ----------
-        bunch_generator : str
+        gen_type : str
             Options are {'twiss', 'load', 'twiss', '2d', '2dx3', '2d+E'}.
             if gen=="twiss", need to define all arguments ax,bx,ex, etc or accept defaults above
             if gen=="2d", need to supply arguments:
@@ -420,19 +428,22 @@ class Sim:
             Distribution name (if generating from Twiss parameters). Options 
             are {'waterbag', 'kv', 'gaussian'}.
         threshold : float
-            1e-6
-        cutoff = -1 {only used if dist=gaussian)
-        current = 0.040 {A}
-        nparts = 200,000 {not valid if gen=load}
+            
+        cutoff : int
+            Cutoff for truncated Gaussian distribution.
+        current :
+            Beam current [A].
+        n_parts : int
+            Number of macro-particles (unused if loading bunch from file).
         center : bool
             Whether to center the bunch.
         twiss : dict
             Input Twiss parameters normalized RMS value; emit: mm-mrad; beta: mm/mrad.
         """
-        if bunch_generator not in ['load', 'twiss', '2d', '2dx3', '2d+E']:
+        if gen_type not in ['load', 'twiss', '2d', '2dx3', '2d+E']:
             raise KeyError(
-                "bunch_generator={} not valid. allowed generators: ['load', 'twiss', '2d', '2dx3', '2d+E']"
-                .format(bunch_generator)
+                "gen_type={} not valid. allowed generators: ['load', 'twiss', '2d', '2dx3', '2d+E']"
+                .format(gen_type)
             )
         # Default Twiss parameters (not used if generating function does not call for them...)
         if twiss is None:
@@ -446,40 +457,48 @@ class Sim:
         twiss.setdefault('alpha_z', 0.0)
         twiss.setdefault('beta_z', 0.6)
         twiss.setdefault('eps_z', 0.2)
-
+        alpha_x = twiss['alpha_x']
+        alpha_y = twiss['alpha_y']
+        alpha_z = twiss['alpha_z']
+        beta_x = twiss['beta_x']
+        beta_y = twiss['beta_y']
+        beta_z = twiss['beta_z']
+        eps_x = twiss['eps_x']
+        eps_y = twiss['eps_y']
+        eps_z = twiss['eps_z']
+        twiss_x = TwissContainer(alpha_x, beta_x, eps_x)
+        twiss_y = TwissContainer(alpha_y, beta_y, eps_y)
+        twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
+        
         # Make emittances un-normalized XAL units [m*rad].
-        twiss['eps_x'] = 1.0e-6 * twiss['eps_x'] / (self.gamma * self.beta)
-        twiss['eps_y'] = 1.0e-6 * twiss['eps_y'] / (self.gamma * self.beta)
-        twiss['eps_z'] = 1.0e-6 * twiss['eps_z'] / (self.gamma**3 * self.beta)
+        eps_x = 1.0e-6 * eps_x / (self.gamma * self.beta)
+        eps_y = 1.0e-6 * eps_y / (self.gamma * self.beta)
+        eps_z = 1.0e-6 * eps_z / (self.gamma**3 * self.beta)
 
         # Transform to pyorbit emittance [GeV*m].
-        twiss['eps_z'] = twiss['eps_z'] * self.gamma**3 * self.beta**2 * self.mass
-        twiss['beta_z'] = twiss['beta_z'] / (self.gamma**3 * self.beta**2 * self.mass)
-        if bunch_generator == "twiss":
+        eps_z = eps_z * self.gamma**3 * self.beta**2 * self.mass
+        beta_z = beta_z / (self.gamma**3 * self.beta**2 * self.mass)
+        if gen_type == "twiss":
             print("========= PyORBIT Twiss ===========")
-            print(
-                "alpha beta emitt[mm*mrad] X= %6.4f %6.4f %6.4f "
-                % (alpha_x, beta_x, eps_x * 1.0e6)
-            )
-            print(
-                "alpha beta emitt[mm*mrad] Y= %6.4f %6.4f %6.4f "
-                % (alpha_y, beta_y, eps_y * 1.0e6)
-            )
-        if bunch_generator in ["twiss", "2d", "2d+E"]:
-            print(
-                "alpha beta emitt[mm*MeV] Z= %6.4f %6.4f %6.4f "
-                % (alpha_z, beta_z, eps_z * 1.0e6)
-            )
-
-        if bunch_generator == "load":
+            print('alpha_x = {:6.4f}'.format(alpha_x))
+            print('beta_x = {:6.4f} [mm/mrad]'.format(beta_x))
+            print('eps_x = {:6.4f} [mm*mrad]'.format(1.0e6 * eps_x))
+            print('alpha_y = {:6.4f}'.format(alpha_y))
+            print('beta_y = {:6.4f} [mm/mrad]'.format(beta_y))
+            print('eps_y = {:6.4f} [mm*mrad]'.format(1.0e6 * eps_y))
+        if gen_type in ["twiss", "2d", "2d+E"]:
+            print('alpha_z = {:6.4f}'.format(alpha_z))
+            print('beta_z = {:6.4f} [mm/mrad]'.format(beta_z))
+            print('eps_z = {:6.4f} [mm*MeV]'.format(1.0e6 * eps_z))
+            
+        if gen_type == "load":
             if bunch_filename is None:
                 bunch_filename = os.path.join(
-                    self.default.home,
+                    self.default.home, 
                     self.default.defaultdict["BUNCH_IN"],
                 )
-            bunch_gen = gen_bunch.Base_BunchGenerator()
+            bunch_gen = bg.Base_BunchGenerator()
 
-            # -- generate bunch by reading in file w/  macroparticle coordinates
             if not os.path.isfile(bunch_filename):
                 raise ValueError("Bunch file '{}' does not exist.".format(bunch_filename))
             print("Reading in bunch from file %s..." % bunch_filename)
@@ -487,63 +506,51 @@ class Sim:
                 self.bunch_in = Bunch()
                 self.bunch_in.readBunch(bunch_filename)
             elif bunch_file_format == "parmteq":
-                self.bunch_in = bunch_gen.read_parmteq_bunch(bunch_filename)
+                self.bunch_in = bg.read_parmteq_bunch(bunch_filename)
             else:
                 raise KeyError(
                     "Do not recognize format %s for bunch file" % (bunch_file_format)
                 )
-            # -- read in nparts and macrosize
-            nparts = self.bunch_in.getSize()
-
+                
+            n_parts = self.bunch_in.getSize()
             macrosize = self.bunch_in.macroSize()
-            # -- overwrite mass and charge:
-            # self.bunch_in.getSyncParticle().kinEnergy(self.ekin)
+            self.bunch_in.getSyncParticle().kinEnergy(self.ekin)
             self.bunch_in.mass(self.mass)
             self.bunch_in.charge(self.charge)
-
             self.z2phase = bunch_gen.get_z_to_phase_coeff()
             self.current = bunch_gen.get_beam_current() * 1e-3
 
-            ## -- to-do: insert function to extract peak current from coordinates
+            ## TODO: insert function to extract peak current from coordinates
             ## peak current = N_peak * macroSize * consts.charge_electron * self.beta * consts.speed_of_light
             ## where N_peak is peak number density
-            print("Bunch read completed. Imported %i macroparticles." % nparts)
+            print("Bunch read completed. Imported {} macroparticles.".format(n_parts))
 
-        # Generate bunch by Twiss params or measured distributions.
-        if bunch_generator in ["twiss", "2d", "2d+E", "2dx3"]:
-            nparts = kwargs.get("nparts", 200000)
-            self.current = kwargs.get("current", 0.040)
-            bunchdistributor = kwargs.get("dist", "gaussian") 
-            cut_off = kwargs.get("cutoff", -1)
-            distributor_class = None
-            if bunchdistributor == "gaussian":
-                if bunch_generator == "twiss":
-                    distributor_class = GaussDist3D
-                elif bunch_generator in ["2d", "2d+E"]:
-                    distributor_class = GaussDist1D
-            elif bunchdistributor == "waterbag":
-                if bunch_generator == "twiss":
-                    distributor_class = WaterBagDist3D
-                elif bunch_generator in ["2d", "2d+E"]:
-                    distributor_class = WaterBagDist1D
-            elif bunchdistributor == "kv":
-                if bunch_generator == "twiss":
-                    distributor_class = KVDist3D
-                elif bunch_generator in ["2d", "2d+E"]:
-                    distributor_class = KVDist1D
-            else:
+        elif gen_type in ["twiss", "2d", "2d+E", "2dx3"]:
+            self.current = current
+            dist_class = None
+            if dist == "gaussian":
+                if gen_type == "twiss":
+                    dist_class = GaussDist3D
+                elif gen_type in ["2d", "2d+E"]:
+                    dist_class = GaussDist1D
+            elif dist == "waterbag":
+                if gen_type == "twiss":
+                    dist_class = WaterBagDist3D
+                elif gen_type in ["2d", "2d+E"]:
+                    dist_class = WaterBagDist1D
+            elif dist == "kv":
+                if gen_type == "twiss":
+                    dist_class = KVDist3D
+                elif gen_type in ["2d", "2d+E"]:
+                    dist_class = KVDist1D
+            if dist_class is None:
                 raise ValueError(
                     "Unrecognized distributor {}. Accepted classes are 'gaussian', 'waterbag', 'kv'."
-                    .format(bunchdistributor)
+                    .format(dist)
                 )
-
-            # Make generator instances.
-            if bunch_generator == "twiss":
-                twiss_x = TwissContainer(alpha_x, beta_x, eps_x)
-                twiss_y = TwissContainer(alpha_y, beta_y, eps_y)
-                twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
-                print("Generating bunch based off twiss parameters (N = {})".format(nparts))
-                bunch_gen = gen_bunch.BTF_Linac_bunch_generator(
+            if gen_type == "twiss":
+                print("Generating bunch based off twiss parameters (N = {})".format(n_parts))
+                bunch_gen = bg.BTF_Linac_BunchGenerator(
                     twiss_x,
                     twiss_y,
                     twiss_z,
@@ -553,26 +560,18 @@ class Sim:
                     curr=self.current * 1e3,
                     freq=self.freq,
                 )
-
-            elif bunch_generator in ["2d", "2d+E", "2dx3"]:
-                xfilename = kwargs.get("xfile", "")
-                yfilename = kwargs.get("yfile", "")
-                sample_method = kwargs.get("sample", "cdf")
-                thres = kwargs.get("threshold", 1e-6)
-
-                phaseSpGenX = gen_bunch.PhaseSpaceGen(xfilename, threshold=thres)
-                phaseSpGenY = gen_bunch.PhaseSpaceGen(yfilename, threshold=thres)
+            elif gen_type in ["2d", "2d+E", "2dx3"]:
+                phase_sp_gen_x = bg.PhaseSpaceGen(xfilename, threshold=thresh)
+                phase_sp_gen_y = bg.PhaseSpaceGen(yfilename, threshold=thresh)
                 twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
-
-                if bunch_generator == "2d":
-
+                if gen_type == "2d":
                     print(
-                        "Generating bunch based off 2d emittance measurements ( N = %i )"
-                        % nparts
+                        "Generating bunch based off 2d emittance measurements (n_parts = {})."
+                        .format(n_parts)
                     )
-                    bunch_gen = gen_bunch.BTF_Linac_TrPhaseSpace_bunch_generator(
-                        phaseSpGenX,
-                        phaseSpGenY,
+                    bunch_gen = bg.BTF_Linac_TrPhaseSpace_BunchGenerator(
+                        phase_sp_gen_x,
+                        phase_sp_gen_y,
                         twiss_z,
                         mass=self.mass,
                         charge=self.charge,
@@ -582,24 +581,22 @@ class Sim:
                         method=sample_method,
                     )
 
-                elif bunch_generator == "2d+E":
-
+                elif gen_type == "2d+E":
                     efilename = kwargs.get("efile", "")
-                    phaseSpGenZ = gen_bunch.PhaseSpaceGenZPartial(
+                    phase_sp_gen_z = bg.PhaseSpaceGenZPartial(
                         efilename,
                         twiss_z,
-                        zdistributor=distributor_class,
+                        zdistributor=dist_class,
                         cut_off=cut_off,
                     )
-
                     print(
-                        "Generating bunch based off 2d emittance + 1d energy profile measurements ( N = %i )"
-                        % nparts
+                        "Generating bunch based off 2d emittance + 1d energy profile measurements (n_parts = {})."
+                        .format(n_parts)
                     )
-                    bunch_gen = gen_bunch.BTF_Linac_6DPhaseSpace_BunchGenerator(
-                        phaseSpGenX,
-                        phaseSpGenY,
-                        phaseSpGenZ,
+                    bunch_gen = bg.BTF_Linac_6DPhaseSpace_BunchGenerator(
+                        phase_sp_gen_x,
+                        phase_sp_gen_y,
+                        phase_sp_gen_z,
                         mass=self.mass,
                         charge=self.charge,
                         ekin=self.ekin,
@@ -607,20 +604,17 @@ class Sim:
                         freq=self.freq,
                         method=sample_method,
                     )
-                elif bunch_generator == "2dx3":
-
-                    zfilename = kwargs.get("zfile", "")
-                    phaseSpGenZ = gen_bunch.PhaseSpaceGen(zfilename, threshold=thres)
-
+                elif gen_type == "2dx3":
+                    phase_sp_gen_z = bg.PhaseSpaceGen(zfilename, threshold=thresh)
                     print(
-                        "Generating bunch based off 2d emittances in x,y,z planes ( N = %i )"
-                        % nparts
+                        "Generating bunch based off 2d emittances in x,y,z planes (n_parts = {})."
+                        .format(n_parts)
                     )
                     # -- is this the right method?
-                    bunch_gen = gen_bunch.BTF_Linac_6DPhaseSpace_BunchGenerator(
-                        phaseSpGenX,
-                        phaseSpGenY,
-                        phaseSpGenZ,
+                    bunch_gen = bg.BTF_Linac_6DPhaseSpace_BunchGenerator(
+                        phase_sp_gen_x,
+                        phase_sp_gen_y,
+                        phase_sp_gen_z,
                         mass=self.mass,
                         charge=self.charge,
                         ekin=self.ekin,
@@ -628,23 +622,14 @@ class Sim:
                         freq=self.freq,
                         method=sample_method,
                     )
-
-            # -- set the initial kinetic energy in GeV
-            bunch_gen.setKinEnergy(self.ekin)
-
-            # -- generate bunch
+            bunch_gen.set_kin_energy(self.ekin)
             self.bunch_in = bunch_gen.get_bunch(
-                nParticles=int(nparts), 
-                distributor_class=distributor_class,
+                n_parts=int(n_parts), 
+                dist_class=dist_class,
             )
-
-            # -- save coefficient for Z to Phase
             self.z2phase = bunch_gen.get_z_to_phase_coeff()
-
-            # -- report
-            nparts = self.bunch_in.getSize()
-            print("Bunch Generation completed with %i macroparticles." % nparts)
-
+            n_parts = self.bunch_in.getSize()
+            print("Bunch Generation completed with {} macroparticles.".format(n_parts))
         if center:
             self.center_bunch()
 
@@ -699,11 +684,11 @@ class Sim:
         dec : float
             Bunch is decimated by factor 10**dec.
         """
-        nparts0 = self.bunch_in.getSizeGlobal()
-        stride = nparts0 / 10.0**dec
-        if (0 < dec < np.log10(nparts0)):
-            ind = np.arange(0, nparts0, stride).astype(int)
-            nparts = len(ind)
+        n_parts0 = self.bunch_in.getSizeGlobal()
+        stride = n_parts0 / 10.0**dec
+        if (0 < dec < np.log10(n_parts0)):
+            ind = np.arange(0, n_parts0, stride).astype(int)
+            n_parts = len(ind)
             newbunch = Bunch()
             self.bunch_in.copyEmptyBunchTo(newbunch)
             for i in ind:
@@ -721,22 +706,22 @@ class Sim:
         else:
             print("No decimation for 10^{}.".format(dec))
 
-    def resample_bunch(self, nparts, rms_factor=0.05):
+    def resample_bunch(self, n_parts, rms_factor=0.05):
         """Up/down-sample to obtain requested number of particles.
 
-        nparts = number of desired particles in bunch.
+        n_parts = number of desired particles in bunch.
         """
-        nparts0 = self.bunch_in.getSizeGlobal()
-        mult = float(nparts) / float(nparts0)
-        nparts = int(nparts)
-        print("Resampling bunch from %i to %i particles..." % (nparts0, nparts))
+        n_parts0 = self.bunch_in.getSizeGlobal()
+        mult = float(n_parts) / float(n_parts0)
+        n_parts = int(n_parts)
+        print("Resampling bunch from %i to %i particles..." % (n_parts0, n_parts))
 
         print("mult = %.3f" % mult)
         print(mult == 1)
 
-        # -- make an array of existing coordinates (length=nparts0)
-        coords0 = np.zeros([nparts0, 6])
-        for i in range(nparts0):
+        # -- make an array of existing coordinates (length=n_parts0)
+        coords0 = np.zeros([n_parts0, 6])
+        for i in range(n_parts0):
             coords0[i, :] = [
                 self.bunch_in.x(i),
                 self.bunch_in.xp(i),
@@ -750,14 +735,14 @@ class Sim:
             return []
         else:
 
-            # -- down-sample if nparts0 > nparts-new
+            # -- down-sample if n_parts0 > n_parts-new
             if mult < 1:
-                ind = np.random.permutation(np.arange(nparts0))[0:nparts]
+                ind = np.random.permutation(np.arange(n_parts0))[0:n_parts]
 
-            # -- up-sample if nparts0 < nparts-new
+            # -- up-sample if n_parts0 < n_parts-new
             # -- this way is a lot of work
             elif mult > 1:
-                nnew = nparts - nparts0
+                nnew = n_parts - n_parts0
 
                 # -- normal distribution of new particles will be ~1% rms width
                 rmswidths = np.sqrt((coords0**2).mean(axis=0))
@@ -771,15 +756,15 @@ class Sim:
                 # -- explode each coordinate into intmultx particles (Gaussian cloud)
                 # -- this will create a bunch with integere x original size (ie, 2x, 3x, etc..)
                 newcoords = np.random.normal(
-                    loc=coords0, scale=scale, size=[intmult, nparts0, 6])
-                reshape_coords = np.zeros([intmult * nparts0, 6], dtype="f8")
+                    loc=coords0, scale=scale, size=[intmult, n_parts0, 6])
+                reshape_coords = np.zeros([intmult * n_parts0, 6], dtype="f8")
                 for i in range(6):
                     reshape_coords[:, i] = newcoords[:, :, i].flatten()
 
                 coords0 = reshape_coords.copy()
 
                 # -- and downsample to desired number
-                ind = np.random.permutation(np.arange(len(coords0)))[0:nparts]
+                ind = np.random.permutation(np.arange(len(coords0)))[0:n_parts]
 
             # -- make new bunch and place re-sampled coordinates
             newbunch = Bunch()
@@ -815,12 +800,11 @@ class Sim:
 
     def dump_parmila(self, **kwargs):
         filename = kwargs.get("filename", [])
-        bunch_gen = gen_bunch.Base_BunchGenerator()
+        bunch_gen = bg.Base_BunchGenerator()
         if filename:
-            bunch_gen.dump_parmila_file(
-                self.bunch_in, phase_init=-0.0, fileName=filename
-            )
-            print("Bunch dumped to %s" % filename)
+            bunch_gen.dump_parmila_file(self.bunch_in, phase_init=-0.0, 
+                                        fileName=filename)
+            print("Bunch dumped to {}".format(filename))
         else:
             bunch_gen.dump_parmila_file(self.bunch_in, phase_init=-0.0)
             print("Bunch dumped to default file")

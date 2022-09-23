@@ -99,7 +99,11 @@ if switches['overlapping_pmq']:
 if switches['space_charge']:
     sim.init_sc_nodes(min_dist=sclen, solver='fft', gridmult=gridmult, n_bunches=n_bunches)
     
-sim.init_bunch(gen="load", file=os.path.join(os.getcwd(), fio['in']['bunch']))
+sim.init_bunch(
+    gen_type='twiss',
+    dist='waterbag',
+    n_parts=200000,
+)
 
 if switches['decorrelate']:
     print('Initial covariance matrix:')
