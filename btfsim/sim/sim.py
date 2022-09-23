@@ -86,7 +86,7 @@ class Sim:
         self.init_apertures()
         self.init_sc_nodes()
         if init_bunch:
-            self.init_bunch()
+            self.init_bunch()        
 
     def enable_movie(self, **kwargs):
         self.movie_flag = 1
@@ -328,7 +328,7 @@ class Sim:
             # ellipse method can be used for the initial estimate because it
             # is faster than the FFT method.
             calc = SpaceChargeCalcUnifEllipse(n_ellipsoid)
-            space_charge_nodes = setUniformEllipsesSCAccNodes(self.latgen.lattice, min_dist, calc)
+            sc_nodes = setUniformEllipsesSCAccNodes(self.latgen.lattice, min_dist, calc)
         else:
             # 3D FFT space charge solver. The number of macro-particles 
             # should be increased by m**3 when the grid resolution increases
@@ -338,16 +338,9 @@ class Sim:
             if n_bunches:
                 calc.numExtBunches(n_bunches)
                 calc.freqOfBunches(self.freq)
-            space_charge_nodes = setSC3DAccNodes(self.latgen.lattice, min_dist, calc)
-        max_sc_length = 0.0
-        min_sc_length = self.latgen.lattice.getLength()
-        for sc_node in space_charge_nodes:
-            if sc_node.getLengthOfSC() > max_sc_length:
-                max_sc_length = scl
-            if sc_node.getLengthOfSC() < min_sc_length:
-                min_sc_length = scl
+            sc_nodes = setSC3DAccNodes(self.latgen.lattice, min_dist, calc)
         self.lattice = self.latgen.lattice
-        self.scnodes = space_charge_nodes
+        self.scnodes = sc_nodes
         print('Space charge nodes initialized.')
 
     def init_apertures(self, aprt_pipe_diameter=0.04):
