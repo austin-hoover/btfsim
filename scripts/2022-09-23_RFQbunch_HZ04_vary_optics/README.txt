@@ -5,3 +5,5 @@ Using RFQ simulation as input:
 * Beam current = 42 mA
 
 The bunch coordinate array is dumped at HZ04.
+
+

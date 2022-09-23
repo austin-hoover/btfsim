@@ -71,11 +71,14 @@ sim.init_lattice(
     mstatename=fio['in']['mstate'],
 )
 
-quad_ids = ['QH01', 'QV02', 'QH03', 'QV04']
-for quad_id in quad_ids:
-    current = sim.latgen.magnets[quad_id]['current']
-    spdict = {quad_id: 0.0}
-    sim.update_quads(units='Amps', **spdict)
+
+# Change quad currents.
+# quad_ids = ['QH01', 'QV02', 'QH03', 'QV04']
+# for quad_id in quad_ids:
+#     current = sim.latgen.magnets[quad_id]['current']
+#     spdict = {quad_id: 0.0}
+#     sim.update_quads(units='Amps', **spdict)
+    
     
 if switches['bunch_monitors']:
     for node in sim.lattice.getNodes():
@@ -110,8 +113,7 @@ sim.shift_bunch(x0=x0, y0=y0, xp0=xp0, yp0=yp0)
 
 # Run simulation
 # ------------------------------------------------------------------------------
-if start == 0:
-    sim.dump_bunch(os.path.join(outdir, _base + '_bunch_init.dat'))
+# sim.dump_bunch(os.path.join(outdir, _base + '_bunch_init.dat'))
 
 def process_start_stop_arg(arg):
     return "MEBT:{}".format(arg) if type(arg) is str else arg

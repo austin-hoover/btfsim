@@ -62,8 +62,8 @@ n_bunches = 3  # number of bunches to model
 # Initialize simulation
 # ------------------------------------------------------------------------------
 _base = '{}-{}-{}-{}'.format(timestamp, script_name, start, stop)
-fio['out']['bunch'] = _base + '_bunch_{}.dat'.format(stop)
-fio['out']['history'] = os.path.join(outdir, _base + '_history.dat')
+fio['out']['bunch'] = _base + '-bunch-{}.dat'.format(stop)
+fio['out']['history'] = os.path.join(outdir, _base + '-history.dat')
 
 sim = main.Sim(outdir=outdir)
 sim.dispersion_flag = int(dispersion_flag)
