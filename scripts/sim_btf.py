@@ -2,6 +2,7 @@
 from __future__ import print_function
 import sys
 import os
+import shutil
 import time
 from pathlib import Path
 
@@ -24,6 +25,7 @@ switches = {
     'space_charge': True,  # toggle space charge calculation
     'decorrelate': False,  # decorrelate inital bunch
     'bunch_monitors': False  # bunch monitor nodes within lattice
+    'copy_file': True  # make a time-stamped copy of this script
 }
 
 # File paths
@@ -33,6 +35,8 @@ timestamp = time.strftime('%y%m%d%H%M%S')
 outdir = os.path.join('data/_output/', datestamp)
 if not os.path.isdir(outdir):
     os.makedirs(outdir)
+if switches['copy_file']:
+    shutil.copy(__file__, '{}-{}'.format(timestamp, __file__))
 fio = dict() 
 fio['in'] = dict()
 fio['out'] = dict()

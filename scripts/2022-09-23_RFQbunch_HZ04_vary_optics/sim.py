@@ -2,8 +2,10 @@ from __future__ import print_function
 import sys
 import os
 import time
+import shutil
 from pathlib import Path
 from pprint import pprint
+from pathlib import Path 
 
 import numpy as np
 
@@ -12,6 +14,7 @@ from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQua
 from btfsim.lattice import diagnostics
 from btfsim.lattice.btf_quad_func_factory import btf_quad_func_factory
 from btfsim.sim.sim import Sim
+from btfsim.util import utils
 import btfsim.bunch.utils as butils
 
 
@@ -22,19 +25,32 @@ stop = 'HZ04'  # stop node (name or index)
 switches = {
     'space_charge': True,  # toggle space charge calculation
     'decorrelate': False,  # decorrelate inital bunch
-    'bunch_monitors': False  # bunch monitor nodes within lattice
+    'bunch_monitors': False,  # bunch monitor nodes within lattice
+    'save_init_bunch': False,   # whether to save initial bunch to file
 }
 
 # File paths
+fio = {'in': {}, 'out': {}}  # store input/output paths
 script_name = Path(__file__).stem
 datestamp = time.strftime('%Y-%m-%d')
 timestamp = time.strftime('%y%m%d%H%M%S')
 outdir = os.path.join('data/_output/', datestamp)
 if not os.path.isdir(outdir):
     os.makedirs(outdir)
-fio = dict() 
-fio['in'] = dict()
-fio['out'] = dict()
+    
+# Save the current git revision hash.
+revision_hash = utils.git_revision_hash()
+repo_url = utils.git_url()
+if revision_hash and repo_url:
+    file = open('{}-{}-git_hash.txt'.format(timestamp, script_name), 'w')
+    file.write('{}/-/tree/{}'.format(repo_url, revision_hash))
+    file.close()
+    
+# Save time-stamped copy of this file.
+shutil.copy(
+    __file__, 
+    os.path.join(outdir, '{}-{}'.format(timestamp, __file__))
+)
 
 # Lattice
 fio['in']['mstate'] = 'data/lattice/TransmissionBS34_04212022.mstate'
@@ -113,7 +129,8 @@ sim.shift_bunch(x0=x0, y0=y0, xp0=xp0, yp0=yp0)
 
 # Run simulation
 # ------------------------------------------------------------------------------
-# sim.dump_bunch(os.path.join(outdir, _base + '_bunch_init.dat'))
+if switches['save_init_bunch']:
+    sim.dump_bunch(os.path.join(outdir, _base + '_bunch_init.dat'))
 
 def process_start_stop_arg(arg):
     return "MEBT:{}".format(arg) if type(arg) is str else arg
