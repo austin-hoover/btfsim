@@ -116,13 +116,13 @@ sim.init_bunch(
     bunch_file_format='pyorbit',
 )
 
-if switches['decorrelate']:
-    print('Initial covariance matrix:')
-    print(butils.cov(sim.bunch_in))
-    sim.decorrelate_bunch()
-    print('New covariance matrix:')
-    print(butils.cov(sim.bunch_in))
-    
+## Decorrelate initial beam.
+# print('Initial covariance matrix:')
+# print(butils.cov(sim.bunch_in))
+# sim.decorrelate_bunch()
+# print('New covariance matrix:')
+# print(butils.cov(sim.bunch_in))
+
 ## Transform x-x' <--> y-y'
 # for i in range(sim.bunch_in.getSize()):
 #     x, xp = sim.bunch_in.x(i), sim.bunch_in.xp(i)
