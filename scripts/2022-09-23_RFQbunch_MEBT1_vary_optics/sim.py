@@ -24,9 +24,8 @@ start = 0  # start node (name or index)
 stop = 'HZ04'  # stop node (name or index)
 switches = {
     'space_charge': True,  # toggle space charge calculation
-    'decorrelate': False,  # decorrelate inital bunch
     'bunch_monitors': False,  # bunch monitor nodes within lattice
-    'save_init_bunch': False,   # whether to save initial bunch to file
+    'save_init_bunch': True,   # whether to save initial bunch to file
 }
 
 # File paths
@@ -38,21 +37,6 @@ outdir = os.path.join('data/_output/', datestamp)
 if not os.path.isdir(outdir):
     os.makedirs(outdir)
     
-# Save the current git revision hash.
-revision_hash = utils.git_revision_hash()
-repo_url = utils.git_url()
-if revision_hash and repo_url:
-    _filename = '{}-{}-git_hash.txt'.format(timestamp, script_name)
-    file = open(os.path.join(outdir, _filename), 'w')
-    file.write('{}/-/tree/{}'.format(repo_url, revision_hash))
-    file.close()
-    
-# Save time-stamped copy of this file.
-shutil.copy(
-    __file__, 
-    os.path.join(outdir, '{}-{}.py'.format(timestamp, script_name))
-)
-
 # Lattice
 fio['in']['mstate'] = 'data/lattice/TransmissionBS34_04212022.mstate'
 dispersion_flag = False  # dispersion correction in Twiss calculation
@@ -74,6 +58,21 @@ sclen = 0.01  # max distance between space charge nodes [m]
 gridmult = 6  # grid resolution = 2**gridmult
 n_bunches = 3  # number of bunches to model
 
+# Save the current git revision hash.
+revision_hash = utils.git_revision_hash()
+repo_url = utils.git_url()
+if revision_hash and repo_url:
+    _filename = '{}-{}-git_hash.txt'.format(timestamp, script_name)
+    file = open(os.path.join(outdir, _filename), 'w')
+    file.write('{}/-/tree/{}'.format(repo_url, revision_hash))
+    file.close()
+    
+# Save time-stamped copy of this file.
+shutil.copy(
+    __file__, 
+    os.path.join(outdir, '{}-{}.py'.format(timestamp, script_name))
+)
+
 
 # Initialize simulation
 # ------------------------------------------------------------------------------
@@ -88,13 +87,15 @@ sim.init_lattice(
     mstatename=fio['in']['mstate'],
 )
 
-
-# Change quad currents.
+# # Change quad currents.
+# print('---------------------------------------')
+# print('Changing quad currents!')
 # quad_ids = ['QH01', 'QV02', 'QH03', 'QV04']
 # for quad_id in quad_ids:
 #     current = sim.latgen.magnets[quad_id]['current']
-#     spdict = {quad_id: 0.0}
+#     spdict = {quad_id: -current}
 #     sim.update_quads(units='Amps', **spdict)
+# print('---------------------------------------')
     
     
 if switches['bunch_monitors']:
@@ -121,6 +122,20 @@ if switches['decorrelate']:
     sim.decorrelate_bunch()
     print('New covariance matrix:')
     print(butils.cov(sim.bunch_in))
+    
+## Transform x-x' <--> y-y'
+# for i in range(sim.bunch_in.getSize()):
+#     x, xp = sim.bunch_in.x(i), sim.bunch_in.xp(i)
+#     y, yp = sim.bunch_in.y(i), sim.bunch_in.yp(i)
+#     sim.bunch_in.x(i, y)
+#     sim.bunch_in.y(i, x)
+#     sim.bunch_in.xp(i, yp)
+#     sim.bunch_in.yp(i, xp)
+
+## Transform x' --> -x'
+for i in range(sim.bunch_in.getSize()):
+    xp = sim.bunch_in.xp(i)
+    sim.bunch_in.xp(i, -xp)
 
 sim.attenuate_bunch(beam_current / beam_current_input)
 if bunch_dec_factor is not None and bunch_dec_factor > 1:
