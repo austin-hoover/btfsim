@@ -1,8 +1,8 @@
 # btfsim
 
-Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using [pyorbit](https://github.com/PyORBIT-Collaboration/py-orbit).
+Beam dynamics simulations in the Spallation Neutron Source (SNS) Beam Test Facility (BTF) using [pyorbit](https://github.com/PyORBIT-Collaboration/py-orbit). 
 
-Mostly copied/adapted from K. Ruisard's repo.
+Mostly copied/adapted from K. Ruisard's repo. 
 
 * **./btfsim**: lattice/bunch generation, tracking, etc.
 * **./data**: small data files like lattice XML.
@@ -13,6 +13,6 @@ Mostly copied/adapted from K. Ruisard's repo.
         * Each folder should have a README describing the study.
         * Analysis notebooks should be kept here as well. Jupyter notebooks should be cleared before commiting changes.
 
-No input/output data files are tracked with git; data will be stored on DropBox or external drive with the same file structure. Output files from bunch tracking should have format '{YYMMDDHHMMSS}-{script_name}-{start_node}-{stop_node}-{data_type (like 'bunch' or 'history')}-{location in lattice}.dat'.
+No input/output data files are tracked with git; data will be stored on DropBox or external drive with the same file structure. Output files from bunch tracking should have format '{YYMMDDHHMMSS}-{script_name}-{start_node}-{stop_node}-{data_type (like 'bunch' or 'history')}-{location_in_lattice}.dat'.
 
-All data analysis/visualization routines will be stored in the [`beamphys`](https://github.com/austin-hoover/beamphys) repository. 
+Data analysis/visualization routines will be kept in the [`beamphys`](https://github.com/austin-hoover/beamphys) repository. 
