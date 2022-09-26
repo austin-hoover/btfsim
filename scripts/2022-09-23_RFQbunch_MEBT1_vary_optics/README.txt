@@ -1,10 +1,3 @@
-Investigate the effect of the MEBT optics (QH01, QV02, QH03, QV04) on the x-y-z hollowing observed at HZ04. 
+Investigate the effect of the MEBT optics (QH01, QV02, QH03, QV04) or initial beam divergence on the x-y-z hollowing observed at HZ04. 
 
-Using RFQ simulation as input:
-* 10M particles
-* Beam current = 42 mA
-
-The bunch coordinate array is dumped at HZ04.
-
-* 220923095449-sim-0-HZ04*
-    * 42
+Tracking from start to HZ04 using RFQ simulation as input. The RFQ simulation was launched using old measurements of f(x, x') and f(y, y') in the LEBT at 50 mA beam current. The simulation used 10 million macro-particles and predicted 84% transmission (42 mA output current). It is described in detail here: https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.23.124201. 
