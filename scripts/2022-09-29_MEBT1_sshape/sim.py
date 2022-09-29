@@ -26,6 +26,15 @@ switches = {
     'space_charge': True,  # toggle space charge calculation
     'save_init_bunch': True,   # whether to save initial bunch to file
 }
+
+# File paths (do not change)
+fio = {'in': {}, 'out': {}}  # store input/output paths
+script_name = Path(__file__).stem
+datestamp = time.strftime('%Y-%m-%d')
+timestamp = time.strftime('%y%m%d%H%M%S')
+outdir = os.path.join('data/_output/', datestamp)
+if not os.path.isdir(outdir):
+    os.makedirs(outdir)
     
 # Lattice
 fio['in']['mstate'] = 'data/lattice/TransmissionBS34_04212022.mstate'
@@ -39,15 +48,6 @@ beam_current_input = 42.0  # current specified in input bunch file [mA]
 sclen = 0.01  # max distance between space charge nodes [m]
 gridmult = 6  # grid resolution = 2**gridmult
 n_bunches = 3  # number of bunches to model
-
-# File paths (do not change)
-fio = {'in': {}, 'out': {}}  # store input/output paths
-script_name = Path(__file__).stem
-datestamp = time.strftime('%Y-%m-%d')
-timestamp = time.strftime('%y%m%d%H%M%S')
-outdir = os.path.join('data/_output/', datestamp)
-if not os.path.isdir(outdir):
-    os.makedirs(outdir)
 
 # Save the current git revision hash (do not change).
 revision_hash = utils.git_revision_hash()
