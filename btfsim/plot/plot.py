@@ -8,18 +8,26 @@ import os
 import numpy as np
 import matplotlib
 matplotlib.use('agg')
-import matplotlib.pyplot as plt
+from matplotlib import colors
+from matplotlib import pyplot as plt
 
 
 DIMS = ["x", "x'", "y", "y'", "z", "dE"]
 UNITS = ["mm", "mrad", "mm", "mrad", "mm", "keV"]
 
 
+def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
+    new_cmap = colors.LinearSegmentedColormap.from_list(
+        'trunc({n},{a:.2f},{b:.2f})'.format(n=cmap.name, a=minval, b=maxval),
+        cmap(np.linspace(minval, maxval, n)))
+    return new_cmap
+
+
 def _histogram_bin_edges(X, bins=10, limits=None):
     d = X.shape[1]
-    if type(bins) is not list:
+    if type(bins) not in [list, tuple]:
         bins = d * [bins]
-    if type(limits) is not list:
+    if type(limits) not in [list, tuple]:
         limits = d * [limits] 
     edges = [np.histogram_bin_edges(X[:, i], bins[i], limits[i]) for i in range(d)]
     return edges
@@ -149,6 +157,7 @@ def proj2d(
     axis=(0, 1),
     bins='auto', 
     limits=None, 
+    units=True,
     fig_kws=None,
     **plot_kws
 ):
@@ -158,8 +167,12 @@ def proj2d(
     fig, ax = plt.subplots(**fig_kws)
     labels = True
     if labels:
-        ax.set_xlabel("{} [{}]".format(DIMS[axis[0]], UNITS[axis[0]]))
-        ax.set_ylabel("{} [{}]".format(DIMS[axis[1]], UNITS[axis[1]]))
+        if units:
+            ax.set_xlabel("{} [{}]".format(DIMS[axis[0]], UNITS[axis[0]]))
+            ax.set_ylabel("{} [{}]".format(DIMS[axis[1]], UNITS[axis[1]]))
+        else:
+            ax.set_xlabel("{}".format(DIMS[axis[0]]))
+            ax.set_ylabel("{}".format(DIMS[axis[1]]))
     
     edges = _histogram_bin_edges(data[:, axis], bins=bins, limits=limits)
     image, _ = np.histogramdd(data[:, axis], edges)
@@ -206,4 +219,3 @@ class Plotter:
             self.funcs[i](data=data, info=info, fig_kws=self.fig_kws[i], **self.plot_kws[i])
             plt.savefig(filename, **self.save_kws[i])
             plt.close()
-            
