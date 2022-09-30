@@ -31,11 +31,6 @@ def bunch_coord_array(bunch):
     return X
 
 
-def cov(bunch):
-    """Return 6x6 covariance matrix."""
-    return np.cov(bunch_coord_array(bunch).T)
-
-
 def decorrelate_x_y_z(bunch):
     """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
     X = bunch_coord_array(bunch)
@@ -54,7 +49,7 @@ def decorrelate_x_y_z(bunch):
 
 class BunchCompare:
     """Class to compare two bunches."""
-
+    
     def __init__(self, bunch1, bunch2):
         if isinstance(bunch1, Bunch):
             self.bunch1 = bunch1
@@ -116,7 +111,6 @@ class BunchCompare:
         ind = np.where(sum != 0)[0]
 
         d = np.sum(diff[ind] / sum[ind])
-
         return d
 
 
@@ -128,18 +122,16 @@ class BunchCalculator:
             self.bunch = Bunch()
             self.bunch.readBunch(bunch)
         self.coords = bunch_coord_array(bunch)
+        self.coords[:, :4] *= 1e3  # mm, mrad, MeV
+        self.coords[:, 5] *= 1e6  # keV
         self.cov = np.cov(self.coords.T)
         self.filename = file
         self.twiss_analysis = BunchTwissAnalysis()
         self.twiss_analysis.analyzeBunch(bunch)
-        self.nParts = bunch.getSizeGlobal()
+        self.n_parts = bunch.getSizeGlobal()
         self.gamma = bunch.getSyncParticle().gamma()
         self.beta = bunch.getSyncParticle().beta()
         self.mass = bunch.getSyncParticle().mass()
-
-    def mean(self):
-        """Return centroid in 6D phase space."""
-        return np.mean(self.coords, axis=0)
 
     def twiss(self, dim="x", dispersion_flag=0, emit_norm_flag=0):
         """Return rms 2D Twiss parameters."""
@@ -176,20 +168,24 @@ class BunchCalculator:
 
 
 class BunchTracker:
-    """Class to store beam evolution data.
-
-    dispersion_flag = 0; set to 1 to subtract dispersive term from emittances
-    emit_norm_flag = 0; set to 1 fo calculate normalized emittances
-    """
-
-    def __init__(self, dispersion_flag=0, emit_norm_flag=0):
+    """Class to store bunch evolution data."""
+    
+    def __init__(
+        self, 
+        dispersion_flag=False, 
+        emit_norm_flag=False,
+        plotter=None,
+        save_bunch=None,
+    ):
+        self.save_bunch = save_bunch if save_bunch else dict()
+        self.plotter = plotter
         self.twiss_analysis = BunchTwissAnalysis()
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
         hist_keys = [
             "s",
-            "nparts",
-            "nlost",
+            "n_parts",
+            "n_lost",
             "disp_x",
             "dispp_x",
             "r90",
@@ -202,32 +198,30 @@ class BunchTracker:
         # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
         for i in range(6):
             for j in range(i + 1):
-                hist_keys.append("sig_{}{}".format(j, i))
+                hist_keys.append("sig_{}{}".format(j + 1, i + 1))
         hist_init_len = 10000
         self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
         self.hist["node"] = []
-
+        
     def action_entrance(self, params_dict):
         """Executed at entrance of node."""
         node = params_dict["node"]
         bunch = params_dict["bunch"]
-        pos = params_dict["path_length"]
-        if params_dict["old_pos"] == pos:
+        position = params_dict["path_length"]
+        if params_dict["old_pos"] == position:
             return
-        if params_dict["old_pos"] + params_dict["pos_step"] > pos:
+        if params_dict["old_pos"] + params_dict["pos_step"] > position:
             return
-        params_dict["old_pos"] = pos
+        params_dict["old_pos"] = position
         params_dict["count"] += 1
 
-        # -- update statementb
-        nstep = params_dict["count"]
-        npart = bunch.getSize()
-        print(
-            "Step {}, Nparts {}, s={:.3f} m, node {}".format(
-                nstep, npart, pos, node.getName()
-            )
-        )
+        # Print update statement.
+        n_step = params_dict["count"]
+        n_part = bunch.getSize()
+        print("Step {}, n_parts {}, s={:.3f} [m], node {}"
+              .format(n_step, n_part, position, node.getName()))
 
+        # Compute Twiss parameters.
         calc = BunchCalculator(bunch)
         twiss_x = calc.twiss(
             dim="x",
@@ -260,43 +254,18 @@ class BunchTracker:
             twiss_z["beta"]["value"],
             twiss_z["eps"]["value"],
         )
-        nparts = bunch.getSizeGlobal()
+        n_parts = bunch.getSizeGlobal()
         gamma = bunch.getSyncParticle().gamma()
         beta = bunch.getSyncParticle().beta()
 
-        ## -- compute twiss (this is somehow more robust than above...but doesn't include dispersion flag..)
-        # self.twiss_analysis.analyzeBunch(bunch)
-        # alphaX, betaX, emittX = (
-        #     self.twiss_analysis.getEffectiveAlpha(0),
-        #     self.twiss_analysis.getEffectiveBeta(0),
-        #     self.twiss_analysis.getEffectiveEmittance(0) * 1.0e+6,
-        # )
-        # alphaY, betaY, emittY = (
-        #     self.twiss_analysis.getEffectiveAlpha(1),
-        #     self.twiss_analysis.getEffectiveBeta(1),
-        #     self.twiss_analysis.getEffectiveEmittance(1) * 1.0e+6,
-        # )
-        # alphaZ, betaZ, emittZ = (
-        #     self.twiss_analysis.getTwiss(2)[0],
-        #     self.twiss_analysis.getTwiss(2)[1],
-        #     self.twiss_analysis.getTwiss(2)[3] * 1.0e+6,
-        # )
-
-        # Covariance matrix.
-        Sigma = calc.cov
-
-        # -- compute 90%, 99% extent
-        r90 = dist.radial_extent(calc.coords[:, (0, 2)], 0.90) * 100.0  # [mm]
-        r99 = dist.radial_extent(calc.coords[:, (0, 2)], 0.99) * 100.0  # [mm]
-
-        # Correctly assign the number of particles for the 0th step
+        # Correctly assign the number of particles for the 0th step.
         if params_dict["count"] == 1:
-            self.hist["nparts"][params_dict["count"] - 1] = nparts
+            self.hist["n_parts"][params_dict["count"] - 1] = n_parts
 
-        # -- assign history arrays in hist dict
-        self.hist["s"][params_dict["count"]] = pos
+        # Update history.
+        self.hist["s"][params_dict["count"]] = position
         self.hist["node"].append(node.getName())
-        self.hist["nparts"][params_dict["count"]] = nparts
+        self.hist["n_parts"][params_dict["count"]] = n_parts
         self.hist["alpha_x"][params_dict["count"]] = alpha_x
         self.hist["beta_x"][params_dict["count"]] = beta_x
         self.hist["eps_x"][params_dict["count"]] = eps_x
@@ -308,13 +277,33 @@ class BunchTracker:
         self.hist["alpha_z"][params_dict["count"]] = alpha_z
         self.hist["beta_z"][params_dict["count"]] = beta_z
         self.hist["eps_z"][params_dict["count"]] = eps_z
+        Sigma = np.cov(calc.coords.T)
         for i in range(6):
             for j in range(i + 1):
-                self.hist["sig_{}{}".format(j, i)][params_dict["count"]] = Sigma[j, i]
-        self.hist["r90"][params_dict["count"]] = r90
-        self.hist["r99"][params_dict["count"]] = r99
-        self.hist["nlost"][params_dict["count"]] = self.hist["nparts"][0] - nparts
-
+                key = "sig_{}{}".format(j + 1, i + 1)
+                self.hist[key][params_dict["count"]] = Sigma[j, i]
+        self.hist["n_lost"][params_dict["count"]] = self.hist["n_parts"][0] - n_parts
+        
+        # Make plots.
+        if self.plotter is not None:
+            info = dict()
+            for key in self.hist:
+                info[key] = self.hist[key][-1]
+            info['step'] = params_dict['count']
+            info['node'] = params_dict['node'].getName()
+            info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
+            info['beta'] = params_dict['bunch'].getSyncParticle().beta()        
+            self.plotter.plot(data=calc.coords, info=info, verbose=True)
+            
+        # Write bunch coordinate array to file.
+        if node.getName() in self.save_bunch:
+            filename = ''
+            if self.save_bunch['prefix']:
+                filename = filename + self.save_bunch['prefix'] + '-'
+            filename = filename + 'bunch-{}.dat'.format(node.getName())
+            filename = os.path.join(self.save_bunch['dir'], filename)
+            bunch.dumpBunch(filename)
+                                                        
     def action_exit(self, params_dict):
         """Executed at node exit."""
         self.action_entrance(params_dict)
@@ -347,7 +336,7 @@ class SingleParticleTracker:
     """
 
     def __init__(self):
-        hist_keys = ["s", "nparts", "x", "xp", "y", "yp", "z", "dE"]
+        hist_keys = ["s", "n_parts", "x", "xp", "y", "yp", "z", "dE"]
         hist_init_len = 10000
         self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
         self.hist["node"] = []
@@ -365,14 +354,14 @@ class SingleParticleTracker:
         params_dict["count"] += 1
 
         # -- update statement
-        nstep = params_dict["count"]
-        npart = bunch.getSize()
+        n_step = params_dict["count"]
+        n_part = bunch.getSize()
         print(
-            "Step %i, Nparts %i, s=%.3f m, node %s"
-            % (nstep, npart, pos, node.getName())
+            "Step {}, n_parts={}, s={:.3f} [m], node {}"
+            .format(n_step, n_part, pos, node.getName())
         )
 
-        nParts = bunch.getSizeGlobal()
+        n_parts = bunch.getSizeGlobal()
 
         # -- get particle position, momenta
         x = bunch.x(0) * 1000.0
@@ -385,7 +374,7 @@ class SingleParticleTracker:
         # -- assign history arrays in hist dict
         self.hist["s"][params_dict["count"]] = pos
         self.hist["node"].append(node.getName())
-        self.hist["nparts"][params_dict["count"]] = nParts
+        self.hist["n_parts"][params_dict["count"]] = n_parts
         self.hist["x"][params_dict["count"]] = x
         self.hist["y"][params_dict["count"]] = y
         self.hist["z"][params_dict["count"]] = z
@@ -399,7 +388,7 @@ class SingleParticleTracker:
 
     def cleanup(self):
         # Trim zeros from history.
-        ind = np.where(self.hist["nparts"][1:] == 0)[0][0] + 1
+        ind = np.where(self.hist["n_parts"][1:] == 0)[0][0] + 1
         for key, arr in self.hist.iteritems():
             self.hist[key] = arr[0:ind]
 
@@ -416,14 +405,14 @@ class SingleParticleTracker:
 
         # -- open files to write data
         file_out = open(filename, "w")
-        header = "s[m], nparts, x [mm], xp[mrad], y[mm], yp[mrad], z[mm?], dE[MeV?] \n"
+        header = "s[m], n_parts, x [mm], xp[mrad], y[mm], yp[mrad], z[mm?], dE[MeV?] \n"
         file_out.write(header)
 
         for i in range(len(self.hist["s"]) - 1):
             line = "%.3f %s %i %.6f %.6f %.6f %.6f %.6f %.6f \n" % (
                 self.hist["s"][i],
                 self.hist["node"][i].split(":")[-1],
-                self.hist["nparts"][i],
+                self.hist["n_parts"][i],
                 self.hist["x"][i],
                 self.hist["xp"][i],
                 self.hist["y"][i],

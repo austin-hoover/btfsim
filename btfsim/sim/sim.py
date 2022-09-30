@@ -57,9 +57,14 @@ class Sim:
     lattice : orbit.lattice.AccLattice
         Lattice for tracking.
     latgen : btfsim.lattice.generate_btf_lattice.LatticeGenerator
-        Instance of lattice generator class.
+        Instance of lattice generator class.    
     """
-    def __init__(self, outdir=None):
+    def __init__(self, outdir=None, tracker_kws=None):
+        """Constructor.
+        
+        tracker_kws : dict
+            Key word arguments passed to BunchTracker.
+        """
         self.ekin = 0.0025  # [GeV]
         self.mass = 0.939294  # [GeV/c^2]
         self.charge = -1.0  # elementary charge units
@@ -75,10 +80,10 @@ class Sim:
             self.outdir = os.path.join(os.getcwd(), '/data')
         if not os.path.exists(self.outdir):  # -- make directory if not there yet
             os.mkdir(self.outdir)
-
-        self.movie_flag = 0  
-        self.dispersion_flag = 1
-        self.emit_norm_flag = 0
+ 
+        self.tracker_kws = tracker_kws
+        if self.tracker_kws is None:
+            self.tracker_kws = dict()
 
     def init_all(self, init_bunch=True):
         """Set up full simulation with all default values."""
@@ -87,11 +92,6 @@ class Sim:
         self.init_sc_nodes()
         if init_bunch:
             self.init_bunch()        
-
-    def enable_movie(self, **kwargs):
-        self.movie_flag = 1
-        savefolder = kwargs.pop("savedir", "data/")
-        self.movie = MovieBase(savefolder, **kwargs)
 
     def run(self, start=0.0, stop=None, out='default', verbose=0):
         """Run the simulation.
@@ -115,69 +115,64 @@ class Sim:
 
         # Figure out which nodes are at stop/start position.
         if type(start) in [float, int]:
-            startnode, startnum, zs_startnode, ze_startnode = self.lattice.getNodeForPosition(start)
+            startnode, start_num, zs_startnode, ze_startnode = self.lattice.getNodeForPosition(start)
         elif type(start) is str:
             startnode = self.lattice.getNodeForName(start)
-            startnum = self.lattice.getNodeIndex(startnode)
+            start_num = self.lattice.getNodeIndex(startnode)
             zs_startnode = startnode.getPosition() - 0.5 * startnode.getLength()
             ze_startnode = startnode.getPosition() + 0.5 * startnode.getLength()
         else:
             raise TypeError("Invalid type {} for `start`.".format(type(start)))
             
         if type(stop) in [float, int]:            
-            print("max simulation length = {:.3f}".format(self.lattice.getLength()))
+            print("max simulation length = {:.3f}.".format(self.lattice.getLength()))
             if stop > self.lattice.getLength():
                 stop = self.lattice.getLength()
-            stopnode, stopnum, zs_stopnode, ze_stopnode = self.lattice.getNodeForPosition(stop)
+            stopnode, stop_num, zs_stopnode, ze_stopnode = self.lattice.getNodeForPosition(stop)
         elif type(stop) is str:
             stopnode = self.lattice.getNodeForName(stop)
-            stopnum = self.lattice.getNodeIndex(stopnode)
+            stop_num = self.lattice.getNodeIndex(stopnode)
             zs_stopnode = stopnode.getPosition() - 0.5 * stopnode.getLength()
             ze_stopnode = stopnode.getPosition() + 0.5 * stopnode.getLength()
         else:
             raise TypeError("Invalid type {} for `stop`.".format(type(start)))
             
         print(
-            "Running simulation from {:.4f} m to {:.4f} m (nodes {} to {})"
-            .format(zs_startnode, ze_stopnode, startnum, stopnum)
+            "Running simulation from s = {:.4f} [m] to s = {:.4f} [m] (nodes {} to {})."
+            .format(zs_startnode, ze_stopnode, start_num, stop_num)
         )
 
         # Setup
-        paramsDict = {
+        params_dict = {
             "old_pos": -1.0,
             "count": 0,
             "pos_step": 0.005,
         } 
-        actionContainer = AccActionsContainer("BTF Bunch Tracking")
+        action_container = AccActionsContainer("BTF Bunch Tracking")
 
-        ## Add tracking action; load different tracking routine if bunch has only 
-        ## one particle (single-particle tracking).
+        # Add tracking action; load different tracking routine if bunch has only 
+        # one particle (single-particle tracking).
         if self.bunch_in.getSize() > 1:
-            self.tracker = butils.BunchTracker(
-                dispersion_flag=self.dispersion_flag, 
-                emit_norm_flag=self.emit_norm_flag
-            )
+            self.tracker = butils.BunchTracker(**self.tracker_kws)
         elif self.bunch_in.getSize() == 1:
-            self.tracker = butils.SingleParticleTracker()
-        actionContainer.addAction(self.tracker.action_exit, AccActionsContainer.EXIT)
+            self.tracker = butils.SingleParticleTracker(**self.tracker_kws)
+        action_container.addAction(self.tracker.action_exit, AccActionsContainer.EXIT)
 
         # Run the simulation.
-        if self.movie_flag == 1:
-            actionContainer.addAction(self.movie.makeFrame, AccActionsContainer.EXIT)
         time_start = time.clock()
         self.bunch_track = Bunch()
         self.bunch_in.copyBunchTo(self.bunch_track)
         self.lattice.trackBunch(
             self.bunch_track,
-            paramsDict=paramsDict,
-            actionContainer=actionContainer,
-            index_start=startnum,
-            index_stop=stopnum,
+            paramsDict=params_dict,
+            actionContainer=action_container,
+            index_start=start_num,
+            index_stop=stop_num,
         )
         
         # Save the last time step.
-        paramsDict["old_pos"] = -1
-        self.tracker.action_entrance(paramsDict)
+        params_dict["old_pos"] = -1
+        self.tracker.action_entrance(params_dict)
 
         # Wrap up.
         time_exec = time.clock() - time_start
@@ -238,10 +233,10 @@ class Sim:
 
         # Wrap up.
         if type(stop) in [float, int]:
-            stopnode, stopnum, zs_stopnode, ze_stopnode = self.lattice.getNodeForPosition(stop)
+            stopnode, stop_num, zs_stopnode, ze_stopnode = self.lattice.getNodeForPosition(stop)
         elif type(stop) == str:
             stopnode = self.lattice.getNodeForName(stop)
-            stopnum = self.lattice.getNodeIndex(stopnode)
+            stop_num = self.lattice.getNodeIndex(stopnode)
             zs_stopnode = stopnode.getPosition() - 0.5 * stopnode.getLength()
             ze_stopnode = stopnode.getPosition() + 0.5 * stopnode.getLength()
         self.tracker.hist["s"] = 2.0 * ze_stopnode - self.tracker.hist["s"]
@@ -508,9 +503,7 @@ class Sim:
             elif bunch_file_format == "parmteq":
                 self.bunch_in = bg.read_parmteq_bunch(bunch_filename)
             else:
-                raise KeyError(
-                    "Do not recognize format %s for bunch file" % (bunch_file_format)
-                )
+                raise KeyError("Do not recognize format {} for bunch file".format(bunch_file_format))
                 
             n_parts = self.bunch_in.getSize()
             macrosize = self.bunch_in.macroSize()
@@ -565,10 +558,8 @@ class Sim:
                 phase_sp_gen_y = bg.PhaseSpaceGen(yfilename, threshold=thresh)
                 twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
                 if gen_type == "2d":
-                    print(
-                        "Generating bunch based off 2d emittance measurements (n_parts = {})."
-                        .format(n_parts)
-                    )
+                    print("Generating bunch based off 2d emittance measurements (n_parts = {})."
+                          .format(n_parts))
                     bunch_gen = bg.BTF_Linac_TrPhaseSpace_BunchGenerator(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
