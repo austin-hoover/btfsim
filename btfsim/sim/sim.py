@@ -636,9 +636,13 @@ class BunchTracker:
         emit_norm_flag=False,
         plotter=None,
         save_bunch=None,
+        plot_norm_coords=False,
+        plot_scale_emittance=False,
     ):
         self.save_bunch = save_bunch if save_bunch else dict()
         self.plotter = plotter
+        self.plot_norm_coords = plot_norm_coords
+        self.plot_scale_emittance = plot_scale_emittance
         self.twiss_analysis = BunchTwissAnalysis()
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
@@ -683,31 +687,20 @@ class BunchTracker:
 
         # Compute Twiss parameters.
         calc = BunchCalculator(bunch)
-        twiss_x = calc.twiss(
-            dim="x",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
-        )
+        twiss_x, twiss_y, twiss_z = [
+            calc.twiss(dim=dim, emit_norm_flag=self.emit_norm_flag) 
+            for dim in ('x', 'y', 'z')
+        ]
         alpha_x, beta_x, eps_x = (
             twiss_x["alpha"]["value"],
             twiss_x["beta"]["value"],
             twiss_x["eps"]["value"],
         )
         disp_x, dispp_x = (twiss_x["disp"]["value"], twiss_x["dispp"]["value"])
-        twiss_y = calc.twiss(
-            dim="y",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
-        )
         alpha_y, beta_y, eps_y = (
             twiss_y["alpha"]["value"],
             twiss_y["beta"]["value"],
             twiss_y["eps"]["value"],
-        )
-        twiss_z = calc.twiss(
-            dim="z",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
         )
         alpha_z, beta_z, eps_z = (
             twiss_z["alpha"]["value"],
@@ -752,8 +745,10 @@ class BunchTracker:
             info['step'] = params_dict['count']
             info['node'] = params_dict['node'].getName()
             info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
-            info['beta'] = params_dict['bunch'].getSyncParticle().beta()        
-            self.plotter.plot(data=calc.coords, info=info, verbose=True)
+            info['beta'] = params_dict['bunch'].getSyncParticle().beta()  
+            if self.plot_norm_coords:
+                data = calc.norm_coords(scale_emittance=self.plot_scale_emittance)
+            self.plotter.plot(data=data, info=info, verbose=True)
             
         # Write bunch coordinate array to file.
         if node.getName() in self.save_bunch:

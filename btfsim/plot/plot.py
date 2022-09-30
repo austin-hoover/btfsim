@@ -167,9 +167,11 @@ def proj2d(
     return _plot_image(image, x=centers[0], y=centers[1], ax=ax, **plot_kws)
     
     
-class Plotter:
     
-    def __init__(self, path='.', default_fig_kws=None, default_save_kws=None):
+class Plotter:
+
+    def __init__(self, path='.', default_fig_kws=None, default_save_kws=None,
+                 norm=False, scale_emittance=False):
         self.path = path
         self.default_fig_kws = default_fig_kws
         self.default_save_kws = default_save_kws

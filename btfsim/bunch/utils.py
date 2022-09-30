@@ -196,9 +196,11 @@ class BunchCalculator:
         self.beta = bunch.getSyncParticle().beta()
         self.mass = bunch.getSyncParticle().mass()
 
-    def twiss(self, dim="x", dispersion_flag=0, emit_norm_flag=0):
+    def twiss(self, dim="x", emit_norm_flag=False):
         """Return rms 2D Twiss parameters."""
-        i = ["x", "y", "z"].index(dim)
+        i = dim
+        if type(dim) is str:
+            i = ["x", "y", "z"].index(i)
         alpha, beta = stats.twiss(self.cov, dim=dim)
         eps = stats.emittance(self.cov, dim=dim)
         if emit_norm_flag and dim == "z":
@@ -213,18 +215,21 @@ class BunchCalculator:
             "dispp": {"value": dispp, "unit": ""},
         }
 
-    def norm_coords(self, dim="x"):
+    def norm_coords(self, scale_emittance=False):
         """Return coordinates normalized by rms Twiss parameters in x-x', y-y', z-z'."""
-        x, xp = np.zeros([2, self.bunch.getSize()])
-        X = bunch_coord_array(self.bunch())
-
-        twiss = self.twiss(dim=dim, emit_norm_flag=1)
-        alpha = twiss["alpha"]["value"]
-        beta = twiss["beta"]["value"]
-
-        xn = x / np.sqrt(beta)
-        xnp = alpha * x / np.sqrt(beta) + xp * np.sqrt(beta)
-        return xn, xnp
+        X = self.coords
+        Xn = np.zeros(X.shape)
+        for i, dim in enumerate(['x', 'y', 'z']):
+            twiss = self.twiss(dim=dim)
+            alpha = twiss["alpha"]["value"]
+            beta = twiss["beta"]["value"]
+            i *= 2
+            Xn[:, i] = X[:, i] / np.sqrt(beta)
+            Xn[:, i + 1] = (np.sqrt(beta) * X[:, i + 1]) + (alpha * X[:, i] / np.sqrt(beta))
+            if scale_emittance:
+                eps = twiss["eps"]["value"]
+                Xn[:, i:i+2] = Xn[:, i:i+2] / np.sqrt(eps)
+        return Xn
 
     def radial_density(self, dr=0.1, dim="x"):
         raise NotImplementedError
