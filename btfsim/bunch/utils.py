@@ -31,6 +31,25 @@ def bunch_coord_array(bunch):
     return X
 
 
+def decimate_bunch(bunch, fac=1):
+    """Reduce the number of macro-particles in the bunch."""
+    n_parts0 = bunch.getSizeGlobal()
+    if not (1 <= fac < n_parts0):
+        print("No decimation for fac={}.".format(fac))
+    print('Decimating bunch by factor {}...'.format(fac))
+    new_bunch = Bunch()
+    bunch.copyEmptyBunchTo(new_bunch)
+    for i in range(0, n_parts0, fac):
+        new_bunch.addParticle(
+            bunch.x(i), bunch.xp(i),
+            bunch.y(i), bunch.yp(i),
+            bunch.z(i), bunch.dE(i),
+        )
+    new_bunch.macroSize(fac * bunch.macroSize())
+    new_bunch.copyBunchTo(bunch)
+    print('Done decimating bunch.')
+
+    
 def decorrelate_x_y_z(bunch):
     """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
     X = bunch_coord_array(bunch)

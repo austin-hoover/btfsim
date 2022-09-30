@@ -669,33 +669,9 @@ class Sim:
         macrosize = self.bunch_in.macroSize()
         self.bunch_in.macroSize(macrosize * att)
 
-    def decimate_bunch(self, dec):
-        """Reduce number of macro-particles without changing beam current.
-        
-        dec : float
-            Bunch is decimated by factor 10**dec.
-        """
-        n_parts0 = self.bunch_in.getSizeGlobal()
-        stride = n_parts0 / 10.0**dec
-        if (0 < dec < np.log10(n_parts0)):
-            ind = np.arange(0, n_parts0, stride).astype(int)
-            n_parts = len(ind)
-            newbunch = Bunch()
-            self.bunch_in.copyEmptyBunchTo(newbunch)
-            for i in ind:
-                newbunch.addParticle(
-                    self.bunch_in.x(i),
-                    self.bunch_in.xp(i),
-                    self.bunch_in.y(i),
-                    self.bunch_in.yp(i),
-                    self.bunch_in.z(i),
-                    self.bunch_in.dE(i),
-                )
-            newmacrosize = self.bunch_in.macroSize() * stride
-            newbunch.macroSize(newmacrosize)
-            newbunch.copyBunchTo(self.bunch_in)
-        else:
-            print("No decimation for 10^{}.".format(dec))
+    def decimate_bunch(self, fac=1):
+        """Reduce number of macro-particles without changing beam current."""
+        return butils.decimate_bunch(self.bunch_in, fac=fac)
 
     def resample_bunch(self, n_parts, rms_factor=0.05):
         """Up/down-sample to obtain requested number of particles.

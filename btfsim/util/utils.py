@@ -1,5 +1,6 @@
 import glob
 import hashlib
+import sys
 import os
 import subprocess
 from collections import OrderedDict
@@ -80,3 +81,8 @@ def url_style(url, text=None):
     if text is None:
         text = url
     return {'text': text, 'url': url}
+
+
+def ensure_path_exists(path):
+    if not os.path.isdir(path):
+        os.makedirs(path)
