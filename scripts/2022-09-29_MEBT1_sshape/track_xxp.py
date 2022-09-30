@@ -8,6 +8,7 @@ from pprint import pprint
 from pathlib import Path 
 
 import numpy as np
+from matplotlib import cm
 
 from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQuads_Nodes
 
@@ -22,7 +23,7 @@ from btfsim.plot import plot
 # Setup
 # ------------------------------------------------------------------------------
 start = 0  # start node (name or index)
-stop = 'QH03'  # stop node (name or index)
+stop = 'HZ04'  # stop node (name or index)
 switches = {
     'space_charge': True,  # toggle space charge calculation
     'save_init_bunch': True,   # whether to save initial bunch to file
@@ -42,7 +43,7 @@ fio['in']['mstate'] = 'data/lattice/TransmissionBS34_04212022.mstate'
 fio['in']['bunch'] = 'data/bunch/realisticLEBT_50mA_42mA_8555k.dat'
 
 # Bunch
-bunch_dec_factor = 20  # reduce number of macroparticles by this factor
+bunch_dec_factor = 10  # reduce number of macroparticles by this factor
 beam_current = 42.0  # current to use in simulation [mA]
 beam_current_input = 42.0  # current specified in input bunch file [mA]
 
@@ -74,11 +75,14 @@ fio['out']['history'] = os.path.join(outdir, _base + '-history.dat')
 tracker_kws = dict()
 
 plotter = plot.Plotter(
-    # path=os.path.join(outdir, 'figures'), 
-    path=outdir,
+    path=os.path.join(outdir, 'figures'), 
     default_fig_kws=None, 
     default_save_kws=None,
 )
+plot_norm_coords = True
+tracker_kws['plot_norm_coords'] = plot_norm_coords
+tracker_kws['plot_scale_emittance'] = plot_norm_coords
+
 plotter.add_func(
     plot.proj2d, 
     fig_kws=dict(
@@ -88,20 +92,22 @@ plotter.add_func(
     save_kws=None, 
     name='proj2d', 
     axis=(0, 1),
-    bins='auto',
+    units=(not plot_norm_coords),
+    bins=135,
+    limits=((-5.0, 5.0), (-5.0, 5.0)),
     profx=True, profy=True, 
     prof_kws=dict(alpha=0.7, lw=0.7),
+    mask_zero=True,
+    cmap=plot.truncate_cmap(cm.get_cmap('Greys'), 0.12, 1.0)
 )
 tracker_kws['plotter'] = plotter
-tracker_kws['plot_norm_coords'] = True
-tracker_kws['plot_scale_emittance'] = True
 
 save_bunch = dict()
 save_bunch['dir'] = outdir
 save_bunch['prefix'] = _base
 for node in ['MEBT:QH01', 'MEBT:QV02', 'MEBT:QH03', 'MEBT:QV04']:
     save_bunch[node] = os.path.join(outdir, _base + '-bunch-{}.dat'.format(node))
-# tracker_kws['save_bunch'] = save_bunch
+tracker_kws['save_bunch'] = save_bunch
 
 # Create simulation.
 sim = Sim(
