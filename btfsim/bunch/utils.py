@@ -2,9 +2,9 @@
 from __future__ import print_function
 import sys
 import os
+
 import numpy as np
 import pandas as pd
-from scipy.optimize import curve_fit
 
 from bunch import Bunch
 from bunch import BunchTwissAnalysis
@@ -31,41 +31,205 @@ def bunch_coord_array(bunch):
     return X
 
 
-def decimate_bunch(bunch, fac=1):
-    """Reduce the number of macro-particles in the bunch."""
-    n_parts0 = bunch.getSizeGlobal()
-    if not (1 <= fac < n_parts0):
-        print("No decimation for fac={}.".format(fac))
-    print('Decimating bunch by factor {}...'.format(fac))
-    new_bunch = Bunch()
-    bunch.copyEmptyBunchTo(new_bunch)
-    for i in range(0, n_parts0, fac):
-        new_bunch.addParticle(
-            bunch.x(i), bunch.xp(i),
-            bunch.y(i), bunch.yp(i),
-            bunch.z(i), bunch.dE(i),
-        )
-    new_bunch.macroSize(fac * bunch.macroSize())
-    new_bunch.copyBunchTo(bunch)
-    print('Done decimating bunch.')
+class BunchManager:
+    """Class to manipulate Bunch object."""
+    def __init__(self, bunch=None):
+        self.bunch = bunch
+        
+    def decimate(self, factor=1):
+        """Reduce the number of macro-particles in the bunch.
 
+        This just skips every `fac` indices, so we assume that the bunch
+        coordinates were generated randomly.
+        """
+        n_parts0 = self.bunch.getSizeGlobal()
+        if not factor or not (1 <= factor < n_parts0):
+            print("No decimation for fac={}.".format(factor))
+        print('Decimating bunch by factor {}...'.format(factor))
+        new_bunch = Bunch()
+        self.bunch.copyEmptyBunchTo(new_bunch)
+        for i in range(0, n_parts0, factor):
+            new_bunch.addParticle(
+                self.bunch.x(i), self.bunch.xp(i),
+                self.bunch.y(i), self.bunch.yp(i),
+                self.bunch.z(i), self.bunch.dE(i),
+            )
+        new_bunch.macroSize(factor * self.bunch.macroSize())
+        new_bunch.copyBunchTo(self.bunch)
+        print('Done decimating bunch.')
     
-def decorrelate_x_y_z(bunch):
-    """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
-    X = bunch_coord_array(bunch)
-    for i in (0, 2, 4):
-        idx = np.random.permutation(np.arange(X.shape[0]))
-        X[:, i : i + 2] = X[idx, i : i + 2]
-    for i, (x, xp, y, yp, z, dE) in enumerate(X):
-        bunch.x(i, x)
-        bunch.y(i, y)
-        bunch.z(i, z)
-        bunch.xp(i, xp)
-        bunch.yp(i, yp)
-        bunch.dE(i, dE)
-    return bunch
+    def resample(self, n_parts=1, rms_factor=0.05):
+        """Up/down-sample to obtain requested number of particles.
 
+        Upsampling should probably be done by sampling from estimated pdf...
 
+        Parameters
+        ----------
+        bunch : Bunch
+            The pyorbit bunch to resample.
+        n_parts : int
+            The number of desired particles in the bunch.
+        """
+        n_parts0 = self.bunch.getSizeGlobal()
+        mult = float(n_parts) / float(n_parts0)
+        n_parts = int(n_parts)
+        print("Resampling bunch from {} to {} particles...".format(n_parts0, n_parts))
+        print("mult = {:.3f}".format(mult))
+
+        if mult == 1:
+            return []
+
+        coords0 = bunch_coord_array(self.bunch)
+        # Down-sample if n_parts0 > n_parts_new
+        if mult < 1:
+            ind = np.random.permutation(np.arange(n_parts0))[0:n_parts]
+
+        # Up-sample if n_parts0 < n_parts_new. (This way is a lot of work.)
+        elif mult > 1:
+            nnew = n_parts - n_parts0
+
+            # -- normal distribution of new particles will be ~1% rms width
+            rmswidths = np.sqrt((coords0**2).mean(axis=0))
+            scale = rmswidths * rms_factor
+            # -- longitudinal will be 10x smaller
+            scale[4] *= 0.1
+            scale[5] *= 0.1
+
+            # -- get integer multiplier (round up)
+            intmult = int(np.ceil(mult))
+            # -- explode each coordinate into intmultx particles (Gaussian cloud)
+            # -- this will create a bunch with integere x original size (ie, 2x, 3x, etc..)
+            newcoords = np.random.normal(
+                loc=coords0, 
+                scale=scale, 
+                size=[intmult, n_parts0, 6],
+            )
+            reshape_coords = np.zeros([intmult * n_parts0, 6], dtype="f8")
+            for i in range(6):
+                reshape_coords[:, i] = newcoords[:, :, i].ravel()
+
+            coords0 = reshape_coords.copy()
+
+            # -- and downsample to desired number
+            ind = np.random.permutation(np.arange(len(coords0)))[0:n_parts]
+
+        # -- make new bunch and place re-sampled coordinates
+        newbunch = Bunch()
+        bunch.copyEmptyBunchTo(newbunch)  # copy attributes
+        for i in ind:
+            newbunch.addParticle(
+                coords0[i, 0],
+                coords0[i, 1],
+                coords0[i, 2],
+                coords0[i, 3],
+                coords0[i, 4],
+                coords0[i, 5],
+            )
+        # -- keep same current by re-setting macrosize
+        newmacrosize = self.bunch.macroSize() * (1.0 / mult)
+        newbunch.macroSize(newmacrosize)
+        # -- over-write bunch_in
+        newbunch.copyBunchTo(self.bunch)
+        print("Done resampling.")
+
+    def attenuate(self, fac=1.0):
+        """Adjust current by changing macrosize
+
+        att : float
+            The fractional attenuation.
+        """
+        self.bunch.macroSize(fac * self.bunch.macroSize())
+
+    def decorrelate_x_y_z(self):
+        """Remove inter-plane correlations by permuting (x, x'), (y, y'), (z, z') pairs."""
+        X = bunch_coord_array(self.bunch)
+        for i in (0, 2, 4):
+            idx = np.random.permutation(np.arange(X.shape[0]))
+            X[:, i : i + 2] = X[idx, i : i + 2]
+        for i, (x, xp, y, yp, z, dE) in enumerate(X):
+            self.bunch.x(i, x)
+            self.bunch.y(i, y)
+            self.bunch.z(i, z)
+            self.bunch.xp(i, xp)
+            self.bunch.yp(i, yp)
+            self.bunch.dE(i, dE)
+
+    def shift(self, x, xp, y, yp, z, dE):
+        print('Shifting bunch centroid...')
+        for i in range(self.bunch.getSize()):
+            self.bunch.x(i, self.bunch.x(i) + x)
+            self.bunch.y(i, self.bunch.y(i) + y)  
+            self.bunch.z(i, self.bunch.z(i) + z)
+            self.bunch.xp(i, self.bunch.xp(i) + xp) 
+            self.bunch.yp(i, self.bunch.yp(i) + yp)
+            self.bunch.dE(i, self.bunch.dE(i) + dE)
+        print('Bunch shifted.')
+        
+    def center_bunch(self):
+        """Shift the bunch so that first-order moments are zero."""
+        twiss = BunchTwissAnalysis()
+        twiss.analyzeBunch(self.bunch)
+        self.shift(*[twiss.getAverage(i) for i in range(6)])
+        
+    def dump(self, filename):
+        print('Writing bunch coordinates to {}'.format(filename))
+        self.bunch.dumpBunch(filename)
+        print('Done writing bunch coordinates.')
+        
+
+class BunchCalculator:
+    def __init__(self, bunch, file=None):
+        if isinstance(bunch, Bunch):
+            self.bunch = bunch
+        elif type(bunch) == str:  # load bunch from file
+            self.bunch = Bunch()
+            self.bunch.readBunch(bunch)
+        self.coords = bunch_coord_array(bunch)
+        self.coords[:, :4] *= 1e3  # mm, mrad, MeV
+        self.coords[:, 5] *= 1e6  # keV
+        self.cov = np.cov(self.coords.T)
+        self.filename = file
+        self.twiss_analysis = BunchTwissAnalysis()
+        self.twiss_analysis.analyzeBunch(bunch)
+        self.n_parts = bunch.getSizeGlobal()
+        self.gamma = bunch.getSyncParticle().gamma()
+        self.beta = bunch.getSyncParticle().beta()
+        self.mass = bunch.getSyncParticle().mass()
+
+    def twiss(self, dim="x", dispersion_flag=0, emit_norm_flag=0):
+        """Return rms 2D Twiss parameters."""
+        i = ["x", "y", "z"].index(dim)
+        alpha, beta = stats.twiss(self.cov, dim=dim)
+        eps = stats.emittance(self.cov, dim=dim)
+        if emit_norm_flag and dim == "z":
+            eps *= self.gamma**3 * self.beta
+        disp = self.twiss_analysis.getDispersion(i)
+        dispp = self.twiss_analysis.getDispersionDerivative(i)
+        return {
+            "beta": {"value": beta, "unit": "mm/mrad"},
+            "alpha": {"value": alpha, "unit": ""},
+            "eps": {"value": eps, "unit": "mm-mrad"},
+            "disp": {"value": disp, "unit": "m"},
+            "dispp": {"value": dispp, "unit": ""},
+        }
+
+    def norm_coords(self, dim="x"):
+        """Return coordinates normalized by rms Twiss parameters in x-x', y-y', z-z'."""
+        x, xp = np.zeros([2, self.bunch.getSize()])
+        X = bunch_coord_array(self.bunch())
+
+        twiss = self.twiss(dim=dim, emit_norm_flag=1)
+        alpha = twiss["alpha"]["value"]
+        beta = twiss["beta"]["value"]
+
+        xn = x / np.sqrt(beta)
+        xnp = alpha * x / np.sqrt(beta) + xp * np.sqrt(beta)
+        return xn, xnp
+
+    def radial_density(self, dr=0.1, dim="x"):
+        raise NotImplementedError
+        
+        
 class BunchCompare:
     """Class to compare two bunches."""
     
@@ -131,317 +295,6 @@ class BunchCompare:
 
         d = np.sum(diff[ind] / sum[ind])
         return d
-
-
-class BunchCalculator:
-    def __init__(self, bunch, file=None):
-        if isinstance(bunch, Bunch):
-            self.bunch = bunch
-        elif type(bunch) == str:  # load bunch from file
-            self.bunch = Bunch()
-            self.bunch.readBunch(bunch)
-        self.coords = bunch_coord_array(bunch)
-        self.coords[:, :4] *= 1e3  # mm, mrad, MeV
-        self.coords[:, 5] *= 1e6  # keV
-        self.cov = np.cov(self.coords.T)
-        self.filename = file
-        self.twiss_analysis = BunchTwissAnalysis()
-        self.twiss_analysis.analyzeBunch(bunch)
-        self.n_parts = bunch.getSizeGlobal()
-        self.gamma = bunch.getSyncParticle().gamma()
-        self.beta = bunch.getSyncParticle().beta()
-        self.mass = bunch.getSyncParticle().mass()
-
-    def twiss(self, dim="x", dispersion_flag=0, emit_norm_flag=0):
-        """Return rms 2D Twiss parameters."""
-        i = ["x", "y", "z"].index(dim)
-        alpha, beta = stats.twiss(self.cov, dim=dim)
-        eps = stats.emittance(self.cov, dim=dim)
-        if emit_norm_flag and dim == "z":
-            eps *= self.gamma**3 * self.beta
-        disp = self.twiss_analysis.getDispersion(i)
-        dispp = self.twiss_analysis.getDispersionDerivative(i)
-        return {
-            "beta": {"value": beta, "unit": "mm/mrad"},
-            "alpha": {"value": alpha, "unit": ""},
-            "eps": {"value": eps, "unit": "mm-mrad"},
-            "disp": {"value": disp, "unit": "m"},
-            "dispp": {"value": dispp, "unit": ""},
-        }
-
-    def norm_coords(self, dim="x"):
-        """Return coordinates normalized by rms Twiss parameters in x-x', y-y', z-z'."""
-        x, xp = np.zeros([2, self.bunch.getSize()])
-        X = bunch_coord_array(self.bunch())
-
-        twiss = self.twiss(dim=dim, emit_norm_flag=1)
-        alpha = twiss["alpha"]["value"]
-        beta = twiss["beta"]["value"]
-
-        xn = x / np.sqrt(beta)
-        xnp = alpha * x / np.sqrt(beta) + xp * np.sqrt(beta)
-        return xn, xnp
-
-    def radial_density(self, dr=0.1, dim="x"):
-        raise NotImplementedError
-
-
-class BunchTracker:
-    """Class to store bunch evolution data."""
-    
-    def __init__(
-        self, 
-        dispersion_flag=False, 
-        emit_norm_flag=False,
-        plotter=None,
-        save_bunch=None,
-    ):
-        self.save_bunch = save_bunch if save_bunch else dict()
-        self.plotter = plotter
-        self.twiss_analysis = BunchTwissAnalysis()
-        self.dispersion_flag = dispersion_flag
-        self.emit_norm_flag = emit_norm_flag
-        hist_keys = [
-            "s",
-            "n_parts",
-            "n_lost",
-            "disp_x",
-            "dispp_x",
-            "r90",
-            "r99",
-        ]
-        # Add 2D alpha, beta, and emittance keys.
-        for dim in ["x", "y", "z"]:
-            for name in ["alpha", "beta", "eps"]:
-                hist_keys.append("{}_{}".format(name, dim))
-        # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
-        for i in range(6):
-            for j in range(i + 1):
-                hist_keys.append("sig_{}{}".format(j + 1, i + 1))
-        hist_init_len = 10000
-        self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
-        self.hist["node"] = []
-        
-    def action_entrance(self, params_dict):
-        """Executed at entrance of node."""
-        node = params_dict["node"]
-        bunch = params_dict["bunch"]
-        position = params_dict["path_length"]
-        if params_dict["old_pos"] == position:
-            return
-        if params_dict["old_pos"] + params_dict["pos_step"] > position:
-            return
-        params_dict["old_pos"] = position
-        params_dict["count"] += 1
-
-        # Print update statement.
-        n_step = params_dict["count"]
-        n_part = bunch.getSize()
-        print("Step {}, n_parts {}, s={:.3f} [m], node {}"
-              .format(n_step, n_part, position, node.getName()))
-
-        # Compute Twiss parameters.
-        calc = BunchCalculator(bunch)
-        twiss_x = calc.twiss(
-            dim="x",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
-        )
-        alpha_x, beta_x, eps_x = (
-            twiss_x["alpha"]["value"],
-            twiss_x["beta"]["value"],
-            twiss_x["eps"]["value"],
-        )
-        disp_x, dispp_x = (twiss_x["disp"]["value"], twiss_x["dispp"]["value"])
-        twiss_y = calc.twiss(
-            dim="y",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
-        )
-        alpha_y, beta_y, eps_y = (
-            twiss_y["alpha"]["value"],
-            twiss_y["beta"]["value"],
-            twiss_y["eps"]["value"],
-        )
-        twiss_z = calc.twiss(
-            dim="z",
-            dispersion_flag=self.dispersion_flag,
-            emit_norm_flag=self.emit_norm_flag,
-        )
-        alpha_z, beta_z, eps_z = (
-            twiss_z["alpha"]["value"],
-            twiss_z["beta"]["value"],
-            twiss_z["eps"]["value"],
-        )
-        n_parts = bunch.getSizeGlobal()
-        gamma = bunch.getSyncParticle().gamma()
-        beta = bunch.getSyncParticle().beta()
-
-        # Correctly assign the number of particles for the 0th step.
-        if params_dict["count"] == 1:
-            self.hist["n_parts"][params_dict["count"] - 1] = n_parts
-
-        # Update history.
-        self.hist["s"][params_dict["count"]] = position
-        self.hist["node"].append(node.getName())
-        self.hist["n_parts"][params_dict["count"]] = n_parts
-        self.hist["alpha_x"][params_dict["count"]] = alpha_x
-        self.hist["beta_x"][params_dict["count"]] = beta_x
-        self.hist["eps_x"][params_dict["count"]] = eps_x
-        self.hist["disp_x"][params_dict["count"]] = disp_x
-        self.hist["dispp_x"][params_dict["count"]] = dispp_x
-        self.hist["alpha_y"][params_dict["count"]] = alpha_y
-        self.hist["beta_y"][params_dict["count"]] = beta_y
-        self.hist["eps_y"][params_dict["count"]] = eps_y
-        self.hist["alpha_z"][params_dict["count"]] = alpha_z
-        self.hist["beta_z"][params_dict["count"]] = beta_z
-        self.hist["eps_z"][params_dict["count"]] = eps_z
-        Sigma = np.cov(calc.coords.T)
-        for i in range(6):
-            for j in range(i + 1):
-                key = "sig_{}{}".format(j + 1, i + 1)
-                self.hist[key][params_dict["count"]] = Sigma[j, i]
-        self.hist["n_lost"][params_dict["count"]] = self.hist["n_parts"][0] - n_parts
-        
-        # Make plots.
-        if self.plotter is not None:
-            info = dict()
-            for key in self.hist:
-                info[key] = self.hist[key][-1]
-            info['step'] = params_dict['count']
-            info['node'] = params_dict['node'].getName()
-            info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
-            info['beta'] = params_dict['bunch'].getSyncParticle().beta()        
-            self.plotter.plot(data=calc.coords, info=info, verbose=True)
-            
-        # Write bunch coordinate array to file.
-        if node.getName() in self.save_bunch:
-            filename = ''
-            if self.save_bunch['prefix']:
-                filename = filename + self.save_bunch['prefix'] + '-'
-            filename = filename + 'bunch-{}.dat'.format(node.getName())
-            filename = os.path.join(self.save_bunch['dir'], filename)
-            bunch.dumpBunch(filename)
-                                                        
-    def action_exit(self, params_dict):
-        """Executed at node exit."""
-        self.action_entrance(params_dict)
-
-    def cleanup(self):
-        # Trim zeros from history.
-        ind = np.where(self.hist["sig_11"] == 0)[0][1]
-        for key, arr in self.hist.iteritems():
-            istart = 0 if key == "node" else 1
-            self.hist[key] = arr[istart:ind]
-
-    def write_hist(self, filename=None, sep=" "):
-        """Save history data.
-
-        filename = location to save data
-        """
-        if filename is None:
-            filename = "history.dat"
-        keys = list(self.hist)
-        data = np.array([self.hist[key] for key in keys]).T
-        df = pd.DataFrame(data=data, columns=keys)
-        df.to_csv(filename, sep=sep, index=False)
-        return df
-
-
-class SingleParticleTracker:
-    """This class holds array with beam evolution data.
-
-    Copy of BunchTracker class modified for single-particle tracking (no twiss/size data)
-    """
-
-    def __init__(self):
-        hist_keys = ["s", "n_parts", "x", "xp", "y", "yp", "z", "dE"]
-        hist_init_len = 10000
-        self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
-        self.hist["node"] = []
-
-    def action_entrance(self, params_dict):
-        """Executed at node entrance."""
-        node = params_dict["node"]
-        bunch = params_dict["bunch"]
-        pos = params_dict["path_length"]
-        if params_dict["old_pos"] == pos:
-            return
-        if params_dict["old_pos"] + params_dict["pos_step"] > pos:
-            return
-        params_dict["old_pos"] = pos
-        params_dict["count"] += 1
-
-        # -- update statement
-        n_step = params_dict["count"]
-        n_part = bunch.getSize()
-        print(
-            "Step {}, n_parts={}, s={:.3f} [m], node {}"
-            .format(n_step, n_part, pos, node.getName())
-        )
-
-        n_parts = bunch.getSizeGlobal()
-
-        # -- get particle position, momenta
-        x = bunch.x(0) * 1000.0
-        xp = bunch.xp(0) * 1000.0
-        y = bunch.y(0) * 1000.0
-        yp = bunch.yp(0) * 1000.0
-        z = bunch.z(0) * 1000.0
-        dE = bunch.dE(0) * 1000.0
-
-        # -- assign history arrays in hist dict
-        self.hist["s"][params_dict["count"]] = pos
-        self.hist["node"].append(node.getName())
-        self.hist["n_parts"][params_dict["count"]] = n_parts
-        self.hist["x"][params_dict["count"]] = x
-        self.hist["y"][params_dict["count"]] = y
-        self.hist["z"][params_dict["count"]] = z
-        self.hist["xp"][params_dict["count"]] = xp
-        self.hist["yp"][params_dict["count"]] = yp
-        self.hist["dE"][params_dict["count"]] = dE
-
-    def action_exit(self, params_dict):
-        """Executed at exit of node."""
-        self.action_entrance(params_dict)
-
-    def cleanup(self):
-        # Trim zeros from history.
-        ind = np.where(self.hist["n_parts"][1:] == 0)[0][0] + 1
-        for key, arr in self.hist.iteritems():
-            self.hist[key] = arr[0:ind]
-
-    def write_hist(self, **kwargs):
-        """Save history data.
-
-        optional argument:
-        filename = location to save data
-        """
-
-        # --- file name + location
-        defaultfilename = "btf_output_data.txt"
-        filename = kwargs.get("filename", defaultfilename)
-
-        # -- open files to write data
-        file_out = open(filename, "w")
-        header = "s[m], n_parts, x [mm], xp[mrad], y[mm], yp[mrad], z[mm?], dE[MeV?] \n"
-        file_out.write(header)
-
-        for i in range(len(self.hist["s"]) - 1):
-            line = "%.3f %s %i %.6f %.6f %.6f %.6f %.6f %.6f \n" % (
-                self.hist["s"][i],
-                self.hist["node"][i].split(":")[-1],
-                self.hist["n_parts"][i],
-                self.hist["x"][i],
-                self.hist["xp"][i],
-                self.hist["y"][i],
-                self.hist["yp"][i],
-                self.hist["z"][i],
-                self.hist["dE"][i],
-            )
-            file_out.write(line)
-
-        file_out.close()
 
 
 class Beamlet:
@@ -585,9 +438,6 @@ class AdaptiveWeighting:
         self.hist["node"] = []
 
     def action_entrance(self, params_dict):
-        """
-        Executed at entrance of node
-        """
         node = params_dict["node"]
         bunch = params_dict["bunch"]
         pos = params_dict["path_length"]
@@ -609,17 +459,9 @@ class AdaptiveWeighting:
         macrosize = self.macrosize0 * ntotal / (ntotal - noutside)
         bunch.macroSize(macrosize)
 
-        # -- assign history arrays in hist dict
         self.hist["s"][params_dict["count"]] = pos
         self.hist["node"].append(node.getName())
         self.hist["macro"][params_dict["count"]] = macrosize
 
     def action_exit(self, params_dict):
         self.action_entrance()
-
-
-class Plotter:
-    def __init__(
-        self,
-    ):
-        return

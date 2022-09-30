@@ -30,6 +30,119 @@ def _bin_centers(edges):
     return 0.5 * (edges[:-1] + edges[1:])
 
 
+def _prep_image_for_log(image, method="floor"):
+    """Avoid zeros in image."""
+    if np.all(image > 0):
+        return image
+    if method == "floor":
+        floor = 1e-12
+        if np.max(image) > 0:
+            floor = np.min(image[image > 0])
+        return image + floor
+    elif method == "mask":
+        return np.ma.masked_less_equal(image, 0)
+
+    
+def plot1d(x, y, ax=None, flipxy=False, kind="step", **kws):
+    funcs = {
+        "line": ax.plot,
+        "bar": ax.bar,
+        "step": ax.plot,
+    }
+    if kind == "step":
+        kws.setdefault("drawstyle", "steps-mid")
+    if flipxy:
+        x, y = y, x
+        funcs["bar"] = ax.barh
+    return funcs[kind](x, y, **kws)
+
+
+def _plot_profile(
+    image,
+    xcoords=None,
+    ycoords=None,
+    ax=None,
+    profx=True,
+    profy=True,
+    kind="step",
+    scale=0.12,
+    **plot_kws
+):
+    """Plot 1D projection of image along axis."""
+    if xcoords is None:
+        xcoords = np.arange(image.shape[1])
+    if ycoords is None:
+        ycoords = np.arange(image.shape[0])
+    plot_kws.setdefault("lw", 0.75)
+    plot_kws.setdefault("color", "white")
+
+    def _normalize(profile):
+        pmax = np.max(profile)
+        if pmax > 0:
+            profile = profile / pmax
+        return profile
+
+    px, py = [_normalize(np.sum(image, axis=i)) for i in (1, 0)]
+    yy = ycoords[0] + scale * np.abs(ycoords[-1] - ycoords[0]) * px
+    xx = xcoords[0] + scale * np.abs(xcoords[-1] - xcoords[0]) * py
+    for i, (x, y) in enumerate(zip([xcoords, ycoords], [yy, xx])):
+        if i == 0 and not profx:
+            continue
+        if i == 1 and not profy:
+            continue
+        plot1d(x, y, ax=ax, flipxy=i, kind=kind, **plot_kws)
+    return ax
+
+
+def _plot_image(
+    image,
+    x=None,
+    y=None,
+    ax=None,
+    profx=False,
+    profy=False,
+    prof_kws=None,
+    thresh=None,
+    thresh_type="abs",  # {'abs', 'frac'}
+    contour=False,
+    contour_kws=None,
+    handle_log="floor",
+    fill_value=None,
+    mask_zero=False,
+    **plot_kws
+):
+    """Plot 2D image."""
+    if fill_value is not None:
+        image = np.ma.filled(image, fill_value=fill_value)
+    if thresh is not None:
+        if thresh_type == "frac":
+            thresh = thresh * np.max(image)
+        image[image < max(1e-12, thresh)] = 0
+    if mask_zero:
+        image = np.ma.masked_less_equal(image, 0)
+    if contour_kws is None:
+        contour_kws = dict()
+    contour_kws.setdefault("color", "white")
+    contour_kws.setdefault("lw", 1.0)
+    contour_kws.setdefault("alpha", 0.5)
+    if prof_kws is None:
+        prof_kws = dict()
+    if x is None:
+        x = np.arange(image.shape[0])
+    if y is None:
+        y = np.arange(image.shape[1])
+    if x.ndim == 2:
+        x = x.T
+    if y.ndim == 2:
+        y = y.T
+    mesh = ax.pcolormesh(x, y, image.T, **plot_kws)
+    if contour:
+        ax.contour(x, y, image.T, **contour_kws)
+    _plot_profile(image, xcoords=x, ycoords=y, ax=ax, 
+                 profx=profx, profy=profy, **prof_kws)
+    return ax
+
+
 def proj2d(
     data=None, 
     info=None, 
@@ -50,9 +163,8 @@ def proj2d(
     
     edges = _histogram_bin_edges(data[:, axis], bins=bins, limits=limits)
     image, _ = np.histogramdd(data[:, axis], edges)
-    centers = [_bin_centers(e) for e in edges]            
-    ax.pcolormesh(centers[0], centers[1], image.T, **plot_kws)
-    return ax
+    centers = [_bin_centers(e) for e in edges]  
+    return _plot_image(image, x=centers[0], y=centers[1], ax=ax, **plot_kws)
     
     
 class Plotter:
