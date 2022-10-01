@@ -681,7 +681,7 @@ class Simulation:
         
         # Save the last time step.
         params_dict["old_pos"] = -1
-        self.tracker.action_entrance(params_dict)
+        self.tracker.action(params_dict)
 
         # Wrap up.
         time_exec = time.clock() - time_start
@@ -690,7 +690,7 @@ class Simulation:
             self.bunch_out.dumpBunch(output_filename)
             print("Dumped output bunch to file {}".format(output_filename))
         self.tracker.cleanup()
-        self.tracker.hist["s"] += zs_start_node
+        self.tracker.history["s"] += zs_start_node
 
     def run_reverse(self, start=0.0, stop=None, out='default'):
         """Execute the simulation in reverse.
@@ -748,7 +748,7 @@ class Simulation:
             stop_num = self.lattice.getNodeIndex(stop_node)
             zs_stop_node = stop_node.getPosition() - 0.5 * stop_node.getLength()
             ze_stop_node = stop_node.getPosition() + 0.5 * stop_node.getLength()
-        self.tracker.hist["s"] = 2.0 * ze_stop_node - self.tracker.hist["s"]
+        self.tracker.history["s"] = 2.0 * ze_stop_node - self.tracker.history["s"]
         
     def reset(self):
         self.bunch_out = None
