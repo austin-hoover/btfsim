@@ -29,11 +29,11 @@ from orbit.space_charge.sc3d import setSC3DAccNodes
 from orbit.space_charge.sc3d import setUniformEllipsesSCAccNodes
 import orbit.utils.consts as consts
 
-import btfsim.bunch.btf_linac_bunch_generator as bg
-from btfsim.bunch.utils import BunchManager
-from btfsim.bunch.utils import BunchCalculator
-from btfsim.lattice import lattice_factory
-from btfsim.util.default import Default
+from btfsim import bunch as bg
+from btfsim.bunch import BunchManager
+from btfsim.bunch import BunchCalculator
+from btfsim.lattice import LatticeGenerator
+from btfsim.default import Default
 
 
 class Sim:
@@ -276,7 +276,7 @@ class Sim:
             xml = os.path.join(self.default.home, self.default.defaultdict["XML_FILE"])
         print('xml:', xml)
         
-        self.latgen = lattice_factory.LatticeGenerator(
+        self.latgen = LatticeGenerator(
             xml=xml, 
             beamlines=beamlines, 
             maxdriftlen=maxdriftlen, 
@@ -587,7 +587,7 @@ class Sim:
                         "Generating bunch based off 2d emittance + 1d energy profile measurements (n_parts = {})."
                         .format(n_parts)
                     )
-                    bunch_gen = bg.BTF_Linac_6DPhaseSpace_BunchGenerator(
+                    bunch_gen = bg.BunchGenerator6D(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
                         phase_sp_gen_z,
@@ -605,7 +605,7 @@ class Sim:
                         .format(n_parts)
                     )
                     # -- is this the right method?
-                    bunch_gen = bg.BTF_Linac_6DPhaseSpace_BunchGenerator(
+                    bunch_gen = bg.BunchGenerator6D(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
                         phase_sp_gen_z,
@@ -789,7 +789,6 @@ class SingleParticleTracker:
 
     Copy of BunchTracker class modified for single-particle tracking (no twiss/size data)
     """
-
     def __init__(self):
         hist_keys = ["s", "n_parts", "x", "xp", "y", "yp", "z", "dE"]
         hist_init_len = 10000

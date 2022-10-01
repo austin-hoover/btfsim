@@ -1,9 +1,9 @@
-"""Plot a snapshot of the bunch.
+"""Within-simulation plotting routines.
 
 Keep in mind that this is using python2-compatible matplotlib.
 """
-import sys
 import os
+import sys
 
 import numpy as np
 import matplotlib
@@ -23,7 +23,7 @@ def truncate_cmap(cmap, minval=0.0, maxval=1.0, n=100):
     return new_cmap
 
 
-def _histogram_bin_edges(X, bins=10, limits=None):
+def histogram_bin_edges(X, bins=10, limits=None):
     d = X.shape[1]
     if type(bins) not in [list, tuple]:
         bins = d * [bins]
@@ -33,12 +33,12 @@ def _histogram_bin_edges(X, bins=10, limits=None):
     return edges
 
 
-def _bin_centers(edges):
+def get_bin_centers(edges):
     """Compute bin centers from bin edges."""
     return 0.5 * (edges[:-1] + edges[1:])
 
 
-def _prep_image_for_log(image, method="floor"):
+def prep_image_for_log(image, method="floor"):
     """Avoid zeros in image."""
     if np.all(image > 0):
         return image
@@ -65,7 +65,7 @@ def plot1d(x, y, ax=None, flipxy=False, kind="step", **kws):
     return funcs[kind](x, y, **kws)
 
 
-def _plot_profile(
+def profile(
     image,
     xcoords=None,
     ycoords=None,
@@ -84,11 +84,11 @@ def _plot_profile(
     plot_kws.setdefault("lw", 0.75)
     plot_kws.setdefault("color", "white")
 
-    def _normalize(profile):
-        pmax = np.max(profile)
+    def _normalize(prof):
+        pmax = np.max(prof)
         if pmax > 0:
-            profile = profile / pmax
-        return profile
+            prof = prof / pmax
+        return prof
 
     px, py = [_normalize(np.sum(image, axis=i)) for i in (1, 0)]
     yy = ycoords[0] + scale * np.abs(ycoords[-1] - ycoords[0]) * px
@@ -102,7 +102,7 @@ def _plot_profile(
     return ax
 
 
-def _plot_image(
+def pcolor(
     image,
     x=None,
     y=None,
@@ -146,7 +146,7 @@ def _plot_image(
     mesh = ax.pcolormesh(x, y, image.T, **plot_kws)
     if contour:
         ax.contour(x, y, image.T, **contour_kws)
-    _plot_profile(image, xcoords=x, ycoords=y, ax=ax, 
+    profile(image, xcoords=x, ycoords=y, ax=ax, 
                  profx=profx, profy=profy, **prof_kws)
     return ax
 
@@ -159,6 +159,7 @@ def proj2d(
     limits=None, 
     units=True,
     fig_kws=None,
+    text=None,
     **plot_kws
 ):
     """Plot the 2D projection onto the specified axis."""
@@ -174,15 +175,22 @@ def proj2d(
             ax.set_xlabel("{}".format(DIMS[axis[0]]))
             ax.set_ylabel("{}".format(DIMS[axis[1]]))
     
-    edges = _histogram_bin_edges(data[:, axis], bins=bins, limits=limits)
+    edges = histogram_bin_edges(data[:, axis], bins=bins, limits=limits)
     image, _ = np.histogramdd(data[:, axis], edges)
-    centers = [_bin_centers(e) for e in edges]  
-    return _plot_image(image, x=centers[0], y=centers[1], ax=ax, **plot_kws)
+    centers = [get_bin_centers(e) for e in edges]  
+    pcolor(image, x=centers[0], y=centers[1], ax=ax, **plot_kws)
     
+    if text is not None:
+        if 's' in info:
+            ax.set_title('s = {:.3f} [m]'.format(info['s']))
+            
+            
+def corner():
+    raise NotImplementedError
     
     
 class Plotter:
-
+    """Manage chains of plotting functions, arguments, and file saving."""
     def __init__(self, path='.', default_fig_kws=None, default_save_kws=None,
                  norm=False, scale_emittance=False):
         self.path = path

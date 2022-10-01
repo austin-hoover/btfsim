@@ -1,6 +1,8 @@
-import os
 import inspect
+import os
+
 import numpy as np
+
 from btfsim.util import utils
 
 

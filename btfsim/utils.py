@@ -86,3 +86,8 @@ def url_style(url, text=None):
 def ensure_path_exists(path):
     if not os.path.isdir(path):
         os.makedirs(path)
+        
+        
+def fit_gauss(x, mu=0.0, *params):
+    A, sigma = params
+    return A * np.exp(-((x - mu) ** 2) / (2.0 * sigma**2))

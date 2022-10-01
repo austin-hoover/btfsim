@@ -1,4 +1,3 @@
-"""Module for statistical beam analysis."""
 import numpy as np
 
 

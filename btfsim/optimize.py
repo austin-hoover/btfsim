@@ -1,3 +1,7 @@
+"""Beam/lattice optimization (i.e., matching).
+
+Written by K. Ruisard; have yet to reconcile with this repo.
+"""
 from __future__ import print_function
 
 import numpy as np
@@ -5,8 +9,7 @@ from scipy.optimize import minimize
 
 from orbit.py_linac.lattice_modifications import Replace_Quads_to_OverlappingQuads_Nodes
 
-import btfsim.sim.simulation_main as main
-from btfsim.lattice.btf_quad_func_factory import btf_quad_func_factory as quadfunc
+from btf import sim
 
 
 class Matcher:
@@ -46,7 +49,7 @@ class Matcher:
         beamline = kwargs.pop("beamline", ["MEBT3"])
 
         # -- init sim of BTF in desired beamline area
-        self.sim = main.simBTF()
+        self.sim = sim.simBTF()
         if self.mstatefile:
             if self.xmlfile:
                 self.sim.initLattice(
@@ -77,7 +80,7 @@ class Matcher:
                 z_step,
                 accSeq_Names=beamline,
                 quad_Names=self.quad_names,
-                EngeFunctionFactory=quadfunc,
+                EngeFunctionFactory=quad_func_factory,
             )
 
         if nbunches:
@@ -382,7 +385,7 @@ class PeriodicMatcher:
             solver = "ellipse"
 
         # -- init sim of BTF in FODO line for finding periodic match
-        self.simprd = main.simBTF()
+        self.simprd = sim.simBTF()
         self.simprd.initLattice(beamline=beamline, xml=xmlfile)
         self.simprd.initApertures()
         if self.analyticQuads:
@@ -391,7 +394,7 @@ class PeriodicMatcher:
                 self.simprd.accLattice,
                 z_step,
                 accSeq_Names=beamline,
-                EngeFunctionFactory=quadfunc,
+                EngeFunctionFactory=quad_func_factory,
             )
 
         self.simprd.initSCnodes(solver=solver, n_bunches=nbunches)
