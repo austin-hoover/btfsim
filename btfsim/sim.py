@@ -35,6 +35,7 @@ from btfsim.lattice import LatticeGenerator
 from btfsim.default import Default
 
 
+# Define default Twiss parameters at RFQ exit.
 INIT_TWISS = {
     'alpha_x': -1.9899,
     'beta_x': 0.19636,
@@ -47,26 +48,45 @@ INIT_TWISS = {
     'eps_z': 0.2,
 }
 
+
 class BunchTracker:
-    """Class to store bunch evolution data."""
+    """Class to store bunch evolution data.
+    
+    Attributes
+    ----------
+    history : DataFrame
+        Stores various scalar beam parameters at each node.
+    plotter : btfsim.plot.Plotter
+        Plot routine manager. BunchTracker can decide when the plotter
+        should activate.
+    plot_norm_coords : bool
+        Whether to normalize the coordinates by the rms Twiss parameters
+        before plotting.
+    plot_scale_emittance : bool
+        Whether to scale the coordinates by the rms emittances in 
+        each phase plane before plotting.
+    emit_norm_flag : bool
+    dispersion_flag : bool
+    """
     def __init__(
         self, 
-        dispersion_flag=False, 
-        emit_norm_flag=False,
-        plotter=None,
         save_bunch=None,
+        plotter=None,
         plot_norm_coords=False,
         plot_scale_emittance=False,
+        dispersion_flag=False, 
+        emit_norm_flag=False,
     ):
         self.save_bunch = save_bunch if save_bunch else dict()
         self.plotter = plotter
         self.plot_norm_coords = plot_norm_coords
         self.plot_scale_emittance = plot_scale_emittance
-        self.twiss_analysis = BunchTwissAnalysis()
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
-        hist_keys = [
+        self.twiss_analysis = BunchTwissAnalysis()
+        keys = [
             "s",
+            "node",
             "n_parts",
             "n_lost",
             "disp_x",
@@ -77,17 +97,18 @@ class BunchTracker:
         # Add 2D alpha, beta, and emittance keys.
         for dim in ["x", "y", "z"]:
             for name in ["alpha", "beta", "eps"]:
-                hist_keys.append("{}_{}".format(name, dim))
+                keys.append("{}_{}".format(name, dim))
         # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
         for i in range(6):
             for j in range(i + 1):
-                hist_keys.append("sig_{}{}".format(j + 1, i + 1))
-        hist_init_len = 10000
-        self.hist = {key: np.zeros(hist_init_len) for key in hist_keys}
-        self.hist["node"] = []
+                keys.append("sig_{}{}".format(j + 1, i + 1))
+        self.history = {key: [] for key in keys}
         
-    def action_entrance(self, params_dict):
-        """Executed at entrance of node."""
+    def delete_history(self):
+        for key in self.history:
+            self.history[key] = []
+
+    def action(self, params_dict):
         node = params_dict["node"]
         bunch = params_dict["bunch"]
         position = params_dict["path_length"]
@@ -104,63 +125,46 @@ class BunchTracker:
         print("Step {}, n_parts {}, s={:.3f} [m], node {}"
               .format(n_step, n_part, position, node.getName()))
 
-        # Compute Twiss parameters.
+        # Compute bunch parameters.
         calc = BunchCalculator(bunch)
         twiss_x, twiss_y, twiss_z = [
             calc.twiss(dim=dim, emit_norm_flag=self.emit_norm_flag) 
             for dim in ('x', 'y', 'z')
         ]
-        alpha_x, beta_x, eps_x = (
-            twiss_x["alpha"]["value"],
-            twiss_x["beta"]["value"],
-            twiss_x["eps"]["value"],
-        )
-        disp_x, dispp_x = (twiss_x["disp"]["value"], twiss_x["dispp"]["value"])
-        alpha_y, beta_y, eps_y = (
-            twiss_y["alpha"]["value"],
-            twiss_y["beta"]["value"],
-            twiss_y["eps"]["value"],
-        )
-        alpha_z, beta_z, eps_z = (
-            twiss_z["alpha"]["value"],
-            twiss_z["beta"]["value"],
-            twiss_z["eps"]["value"],
-        )
         n_parts = bunch.getSizeGlobal()
         gamma = bunch.getSyncParticle().gamma()
         beta = bunch.getSyncParticle().beta()
 
         # Correctly assign the number of particles for the 0th step.
         if params_dict["count"] == 1:
-            self.hist["n_parts"][params_dict["count"] - 1] = n_parts
+            self.history["n_parts"][params_dict["count"] - 1] = n_parts
 
         # Update history.
-        self.hist["s"][params_dict["count"]] = position
-        self.hist["node"].append(node.getName())
-        self.hist["n_parts"][params_dict["count"]] = n_parts
-        self.hist["alpha_x"][params_dict["count"]] = alpha_x
-        self.hist["beta_x"][params_dict["count"]] = beta_x
-        self.hist["eps_x"][params_dict["count"]] = eps_x
-        self.hist["disp_x"][params_dict["count"]] = disp_x
-        self.hist["dispp_x"][params_dict["count"]] = dispp_x
-        self.hist["alpha_y"][params_dict["count"]] = alpha_y
-        self.hist["beta_y"][params_dict["count"]] = beta_y
-        self.hist["eps_y"][params_dict["count"]] = eps_y
-        self.hist["alpha_z"][params_dict["count"]] = alpha_z
-        self.hist["beta_z"][params_dict["count"]] = beta_z
-        self.hist["eps_z"][params_dict["count"]] = eps_z
-        Sigma = np.cov(calc.coords.T)
+        self.history["s"].append(position)
+        self.history["node"].append(node.getName())
+        self.history["n_parts"].append(n_parts)
+        self.history["alpha_x"].append(twiss_x['alpha'])
+        self.history["beta_x"].append(twiss_x['beta'])
+        self.history["eps_x"].append(twiss_x['eps'])
+        self.history["disp_x"].append(twiss_x['disp'])
+        self.history["dispp_x"].append(twiss_x['disp'])
+        self.history["alpha_y"].append(twiss_y['alpha'])
+        self.history["beta_y"].append(twiss_y['beta'])
+        self.history["eps_y"].append(twiss_y['eps'])
+        self.history["alpha_z"].append(twiss_z['alpha'])
+        self.history["beta_z"].append(twiss_z['beta'])
+        self.history["eps_z"].append(twiss_z['eps'])
         for i in range(6):
             for j in range(i + 1):
                 key = "sig_{}{}".format(j + 1, i + 1)
-                self.hist[key][params_dict["count"]] = Sigma[j, i]
-        self.hist["n_lost"][params_dict["count"]] = self.hist["n_parts"][0] - n_parts
+                self.history[key].append(calc.cov[j, i])
+        self.history["n_lost"].append(self.history["n_parts"][0] - n_parts)
         
         # Make plots.
         if self.plotter is not None:
             info = dict()
-            for key in self.hist:
-                info[key] = self.hist[key][-1]
+            for key in self.history:
+                info[key] = self.history[key][-1]
             info['step'] = params_dict['count']
             info['node'] = params_dict['node'].getName()
             info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
@@ -168,22 +172,16 @@ class BunchTracker:
             if self.plot_norm_coords:
                 data = calc.norm_coords(scale_emittance=self.plot_scale_emittance)
             self.plotter.plot(data=data, info=info, verbose=True)
-            
-        # Write bunch coordinate array to file.
-        if node.getName() in self.save_bunch:
-            filename = ''
-            if self.save_bunch['prefix']:
-                filename = filename + self.save_bunch['prefix'] + '-'
-            filename = filename + 'bunch-{}.dat'.format(node.getName())
-            filename = os.path.join(self.save_bunch['dir'], filename)
-            bunch.dumpBunch(filename)
-                                                        
+                                                                    
     def cleanup(self):
+        # Convert history lists to numpy arrays.
+        for key in self.history:
+            self.history[key] = np.array(self.history[key])
         # Trim zeros from history.
-        ind = np.where(self.hist["sig_11"] == 0)[0][1]
-        for key, arr in self.hist.iteritems():
+        ind = np.where(np.self.history["sig_11"] == 0)[0][1]
+        for key, arr in self.history.iteritems():
             istart = 0 if key == "node" else 1
-            self.hist[key] = arr[istart:ind]
+            self.history[key] = arr[istart:ind]
 
     def write_hist(self, filename=None, sep=" "):
         """Save history data.
@@ -192,8 +190,8 @@ class BunchTracker:
         """
         if filename is None:
             filename = "history.dat"
-        keys = list(self.hist)
-        data = np.array([self.hist[key] for key in keys]).T
+        keys = list(self.history)
+        data = np.array([self.history[key] for key in keys]).T
         df = pd.DataFrame(data=data, columns=keys)
         df.to_csv(filename, sep=sep, index=False)
         return df
@@ -256,6 +254,7 @@ class Simulation:
         self.init_lattice()
         self.init_apertures()
         self.init_sc_nodes()
+        self.tracker = BunchTracker(**self.tracker_kws)
         if init_bunch:
             self.init_bunch()        
 
@@ -477,7 +476,7 @@ class Simulation:
         # Transform to pyorbit emittance [GeV*m].
         eps_z = eps_z * self.params['gamma']**3 * self.params['beta']**2 * self.params['mass']
         beta_z = beta_z / (self.params['gamma']**3 * self.params['beta']**2 * self.params['mass'])
-        if verbose > 0:
+        if verbose:
             if gen_type == "twiss":
                 print("========= PyORBIT Twiss ===========")
                 print('alpha_x = {:6.4f}'.format(alpha_x))
@@ -492,10 +491,9 @@ class Simulation:
                 print('eps_z = {:6.4f} [mm*MeV]'.format(1.0e6 * eps_z))
             
         if gen_type == "load":
-            print("Reading in bunch from file {}...".format(bunch_filename))
-            
+            print("Reading bunch from file {}...".format(bunch_filename))
             if not os.path.isfile(bunch_filename):
-                raise ValueError("Bunch file '{}' does not exist.".format(bunch_filename))
+                raise ValueError("File '{}' does not exist.".format(bunch_filename))
                 
             bunch_gen = bu.Base_BunchGenerator()
             if bunch_file_format == "pyorbit":
@@ -517,8 +515,8 @@ class Simulation:
             # TODO: insert function to extract peak current from coordinates
             # peak current = N_peak * macroSize * consts.charge_electron * self.params['beta'] * consts.speed_of_light
             # where N_peak is peak number density
-            
-            print("Bunch read completed. Imported {} macroparticles.".format(n_parts))
+
+            print("Bunch read complete {} macroparticles.".format(n_parts))
 
         elif gen_type in ["twiss", "2d", "2d+E", "2dx3"]:
             self.current = current
@@ -541,8 +539,7 @@ class Simulation:
             if dist_class is None:
                 raise ValueError("Unrecognized distributor {}.".format(dist))
             if gen_type == "twiss":
-                print("Generating bunch based off twiss parameters (N = {})".format(n_parts))
-                bunch_gen = bu.BTF_Linac_BunchGenerator(
+                bunch_gen = bu.BunchGeneratorTwiss(
                     twiss_x,
                     twiss_y,
                     twiss_z,
@@ -557,9 +554,7 @@ class Simulation:
                 phase_sp_gen_y = bu.PhaseSpaceGen(yfilename, threshold=thresh)
                 twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
                 if gen_type == "2d":
-                    print("Generating bunch based off 2d emittance measurements (n_parts = {})."
-                          .format(n_parts))
-                    bunch_gen = bu.BTF_Linac_TrPhaseSpace_BunchGenerator(
+                    bunch_gen = bu.BunchGenerator_XXP_YYP_TwissZ(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
                         twiss_z,
@@ -578,11 +573,7 @@ class Simulation:
                         zdistributor=dist_class,
                         cut_off=cut_off,
                     )
-                    print(
-                        "Generating bunch based off 2d emittance + 1d energy profile measurements (n_parts = {})."
-                        .format(n_parts)
-                    )
-                    bunch_gen = bu.BunchGenerator6D(
+                    bunch_gen = bu.BunchGenerator_XXP_YYP_ZZP(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
                         phase_sp_gen_z,
@@ -595,11 +586,7 @@ class Simulation:
                     )
                 elif gen_type == "2dx3":
                     phase_sp_gen_z = bu.PhaseSpaceGen(zfilename, threshold=thresh)
-                    print(
-                        "Generating bunch based off 2d emittances in x,y,z planes (n_parts = {})."
-                        .format(n_parts)
-                    )
-                    bunch_gen = bu.BunchGenerator6D(
+                    bunch_gen = bu.BunchGenerator_XXP_YYP_ZZP(
                         phase_sp_gen_x,
                         phase_sp_gen_y,
                         phase_sp_gen_z,
@@ -617,7 +604,7 @@ class Simulation:
             )
             self.z2phase = bunch_gen.get_z_to_phase_coeff()
             n_parts = self.bunch_in.getSize()
-            print("Bunch Generation completed with {} macroparticles.".format(n_parts))
+            print("Bunch generation complete with {} macroparticles.".format(n_parts))
                     
     def run(self, start=0.0, stop=None, out='default', verbose=0):
         """Run the simulation.
@@ -630,9 +617,6 @@ class Simulation:
             Location of output bunch file. If 'default', use 'btf_output_bunch_end.txt'. 
             If None, does not save anything.
         """
-        if stop is None:
-            stop = self.lattice.getLength()
-
         # Parse default output filename.
         if stop == self.lattice.getLength():
             default_output_filename = "btf_output_bunch_end.txt"
@@ -644,6 +628,8 @@ class Simulation:
             output_filename = os.path.join(self.outdir, out)
 
         # Figure out which nodes are at stop/start position.
+        if stop is None:
+            stop = self.lattice.getLength()
         if type(start) in [float, int]:
             start_node, start_num, zs_start_node, ze_start_node = self.lattice.getNodeForPosition(start)
         elif type(start) is str:
@@ -653,7 +639,6 @@ class Simulation:
             ze_start_node = start_node.getPosition() + 0.5 * start_node.getLength()
         else:
             raise TypeError("Invalid type {} for `start`.".format(type(start)))
-            
         if type(stop) in [float, int]:            
             print("max simulation length = {:.3f}.".format(self.lattice.getLength()))
             if stop > self.lattice.getLength():
@@ -666,25 +651,23 @@ class Simulation:
             ze_stop_node = stop_node.getPosition() + 0.5 * stop_node.getLength()
         else:
             raise TypeError("Invalid type {} for `stop`.".format(type(start)))
+        if verbose:
+            print(
+                "Running simulation from s = {:.4f} [m] to s = {:.4f} [m] (nodes {} to {})."
+                .format(zs_start_node, ze_stop_node, start_num, stop_num)
+            )
             
-        print(
-            "Running simulation from s = {:.4f} [m] to s = {:.4f} [m] (nodes {} to {})."
-            .format(zs_start_node, ze_stop_node, start_num, stop_num)
-        )
+        # Add tracking action at each node entrance.
+        self.tracker = BunchTracker(**self.tracker_kws)
+        action_container = AccActionsContainer("bunch tracker")
+        action_container.addAction(self.tracker.action, AccActionsContainer.ENTRANCE)
 
-        # Setup
+        # Run the simulation.
         params_dict = {
             "old_pos": -1.0,
             "count": 0,
             "pos_step": 0.005,
         } 
-
-        # Add tracking action.
-        self.tracker = BunchTracker(**self.tracker_kws)
-        action_container = AccActionsContainer("bunch tracker")
-        action_container.addAction(self.tracker.action_entrance, AccActionsContainer.ENTRANCE)
-
-        # Run the simulation.
         time_start = time.clock()
         self.bunch_out = Bunch()
         self.bunch_in.copyBunchTo(self.bunch_out)
@@ -769,3 +752,4 @@ class Simulation:
         
     def reset(self):
         self.bunch_out = None
+        self.tracker.delete_history()
