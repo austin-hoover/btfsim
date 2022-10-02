@@ -34,6 +34,15 @@ from orbit.utils import consts
 from btfsim import analysis
 
 
+default_params = {
+    'mass': 0.939294,  # [GeV/c^2]
+    'charge': -1,  # [elementary charge units]
+    'kin_energy': 0.0025,  # [GeV]
+    'current': 0.040,  # [A] 
+    'freq': 402.5e6,  # [Hz]
+}
+
+
 def get_coord_array(bunch):
     """Return Nx6 coordinate array from bunch."""
     X = np.zeros((bunch.getSize(), 6))
@@ -124,6 +133,84 @@ def reverse(bunch):
         bunch.yp(i, -bunch.yp(i))
         bunch.z(i, -bunch.z(i))
         
+        
+def set_current(bunch, current=None, freq=None):
+    """Set macro-size from current [A] and frequency [Hz]."""
+    macro_size = current / freq
+    macro_size = macrosize / (math.fabs(bunch.charge()) * consts.charge_electron)
+    bunch.macroSize(macrosize / bunch.getSizeGlobal())
+
+    
+def get_z_to_phase_coeff(bunch, freq=None):
+    """Return coefficient to calculate phase [degrees] from z [m]."""
+    wavelength = consts.speed_of_light / freq
+    return -360.0 / (bunch.getSyncParticle().beta() * wavelength)
+    
+    
+def load(
+    self, 
+    filename=None,
+    file_format='pyorbit',
+    verbose=False,
+):
+    """Load bunch from coordinates file.
+
+    Parameters
+    ----------
+    filename : str
+        Path the file.
+    file_format : str        
+        'pyorbit':
+            The expected header format is:
+        'parmteq':
+            The expected header format is:
+                Number of particles    =
+                Beam current           =
+                RF Frequency           =
+                The input file particle coordinates were written in double precision.
+                x(cm)             xpr(=dx/ds)       y(cm)             ypr(=dy/ds)       phi(radian)        W(MeV)
+    verbose : bool
+        Whether to print intro/exit messages.
+    """
+    if verbose:
+        print("Reading bunch from file '{}'...".format(bunch_filename))
+    if not os.path.isfile(bunch_filename):
+        raise ValueError("File '{}' does not exist.".format(filename))
+    bunch = Bunch()
+    if file_format == "pyorbit":
+        bunch.readBunch(filename)
+    elif file_format == "parmteq":
+        # Read data.
+        header = np.genfromtxt(filename, max_rows=3, usecols=[0, 1, 2, 3, 4], dtype=str)
+        n_parts = int(header[0, 4])
+        current = np.float(header[1, 3])
+        freq = np.float(header[2, 3])  * 1e6  # MHz to Hz
+        data = np.loadtxt(filename, skiprows=5)
+        
+        # Trim off-energy particles.
+        kin_energy = np.mean(data[:, 5])  # center energy
+        ind = np.where(np.abs(data[:, 5] - kin_energy) < (0.05 * kin_energy))[0]
+        n_parts = len(ind)
+        bunch.getSyncParticle().kinEnergy(kin_energy * 1e-3)
+                
+        # Unit conversion.
+        dE = (data[ind, 5] - kin_energy) * 1e-3  # MeV to GeV
+        x = data[ind, 0] * 1e-2  # cm to m
+        xp = data[ind, 1]  # radians
+        y = data[ind, 2] * 1e-2  # cm to m
+        yp = data[ind, 3]  # radians
+        phi = data[ind, 4]  # radians
+        z = np.rad2deg(phi) / get_z_to_phase_coeff(bunch, freq=freq)
+        
+        # Add particles.
+        for i in range(n_parts):
+            bunch.addParticle(x[i], xp[i], y[i], yp[i], z[i], dE[i])
+    else:
+        raise KeyError("Unrecognized format '{}'.".format(file_format))
+    if verbose:
+        print("Bunch read complete ({} macroparticles).".format(n_parts))
+    return bunch
+        
 
 class BunchCalculator:
     """Calculate parameters from Bunch object.
@@ -193,306 +280,124 @@ class BunchCalculator:
                 eps = twiss["eps"]["value"]
                 Xn[:, i:i+2] = Xn[:, i:i+2] / np.sqrt(eps)
         return Xn
-        
-
-class Base_BunchGenerator(object):
-    """Base class for bunch generators.
     
-    Attributes
-    ----------
-    """
-    def __init__(self, mass=0.939294, charge=-1, ekin=0.0025, current=40.0, freq=402.5e6):
-        self.bunch = Bunch()
-        self.bunch.mass(mass)
-        self.bunch.charge(charge)
-        self.bunch.getSyncParticle().kinEnergy(ekin)
-        self.current = current  # beam current [mA]
-        self.frequency = freq  # RF frequency [Hz]
-
-    def get_z_to_phase_coeff(self):
-        """Returns the coefficient to calculate phase in degrees from the z-coordinate."""
-        self.rf_wavelength = consts.speed_of_light / self.frequency
-        bunch_lambda = self.beta * self.rf_wavelength
-        phase_coeff = -360.0 / bunch_lambda
-        return phase_coeff
-
-    def get_macro_size(self, bunch):
-        # Why not use bunch.macroSize()?
-        macro_size = self.current * 1.0e-3 / self.frequency
-        macro_size /= math.fabs(bunch.charge()) * consts.charge_electron
-        macro_size /= bunch.getSizeGlobal()
-        return macro_size
-
-    def read_pyorbit(self, filename):
-        bunch = Bunch()
-        self.bunch.copyEmptyBunchTo(bunch)
-        bunch.readBunch(filename)
-        return bunch
-
-    def read_parmteq(self, filename):
-        """Reads bunch with expected header format:
-
-        Number of particles    =
-        Beam current           =
-        RF Frequency           =
-        The input file particle coordinates were written in double precision.
-        x(cm)             xpr(=dx/ds)       y(cm)             ypr(=dy/ds)       phi(radian)        W(MeV)
-        """
-        # Read header.
-        header = np.genfromtxt(filename, max_rows=3, usecols=[0, 1, 2, 3, 4], dtype=str)
-        n_parts = int(header[0, 4])
-        current = np.float(header[1, 3])
-        freq = np.float(header[2, 3])
-
-        # Read data, triming off-energy particles.
-        data = np.loadtxt(filename, skiprows=5)
-        kin_energy = np.mean(data[:, 5])  # center energy
-        ind = np.where(np.abs(data[:, 5] - kin_energy) < (0.05 * kin_energy))[0]
-        n_parts = len(ind)
-
-        # -- get particle coordinates
-        de = (data[ind, 5] - kin_energy) * 1e-3  # MeV to GeV
-        x = data[ind, 0] * 1e-2  # cm to m
-        xp = data[ind, 1]  # radians
-        y = data[ind, 2] * 1e-2  # cm to m
-        yp = data[ind, 3]  # radians
-        phi = data[ind, 4]  # radians
-
-        # Change bunch attributes based on input distribution.
-        bunch = Bunch()
-        self.bunch.copyEmptyBunchTo(bunch)
-        self.frequency = freq * 1e6
-        self.getSyncParticle().kinEnergy(kin_energy * 1e-3)
-        phase_coeff = self.get_z_to_phase_coeff()
-        z = np.rad2deg(phi) / phase_coeff
-
-        # Add particles to bunch.
-        for i in range(n_parts):
-            bunch.addParticle(x[i], xp[i], y[i], yp[i], z[i], de[i])
-
-        # Set beam current.
-        self.set_beam_current(current)
-        macrosize = self.calc_macro_size(bunch)
-        bunch.macroSize(macrosize)
-        return bunch
-
-
-class BunchGeneratorTwiss(Base_BunchGenerator):
-    """Generate bunch from {twiss_x, twiss_y, twiss_z}."""
-    def __init__(
-        self,
-        twiss_x,
-        twiss_y,
-        twiss_z,
-        mass=0.939294,
-        charge=-1,
-        ekin=0.0025,
-        curr=40.0,
-        freq=402.5e6,
-    ):
-        self.twiss_x = twiss_x
-        self.twiss_y = twiss_y
-        self.twiss_z = twiss_z
-        super(BunchGeneratorTwiss, self).__init__(
-            mass=mass, charge=charge, ekin=ekin, curr=curr, freq=freq,
+        
+def gen_bunch_twiss(
+    n_parts=0,
+    twiss_x=None,
+    twiss_y=None,
+    twiss_z=None,
+    dist_gen=None,
+    **dist_gen_kws
+):
+    """Generate bunch from Twiss parameters."""
+    comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
+    rank = orbit_mpi.MPI_Comm_rank(comm)
+    size = orbit_mpi.MPI_Comm_size(comm)
+    data_type = mpi_datatype.MPI_DOUBLE
+    main_rank = 0
+    bunch = Bunch()
+    distributor = dist_gen(twiss_x, twiss_y, twiss_z, **dist_gen_kws)
+    bunch.getSyncParticle().time(0.0)
+    for i in range(n_parts):
+        x, xp, y, yp, z, dE = distributor.getCoordinates()
+        x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
+            (x, xp, y, yp, z, dE), data_type, main_rank, comm,
         )
+        if i % size == rank:
+            bunch.addParticle(x, xp, y, yp, z, dE)
+    return bunch
 
-    def get_bunch(self, n_parts=0, dist_class=WaterBagDist3D, **kws):
-        comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
-        rank = orbit_mpi.MPI_Comm_rank(comm)
-        size = orbit_mpi.MPI_Comm_size(comm)
-        data_type = mpi_datatype.MPI_DOUBLE
-        main_rank = 0
-        bunch = Bunch()
-        self.bunch.copyEmptyBunchTo(bunch)
-        macrosize = self.current * 1.0e-3 / self.frequency
-        macrosize /= math.fabs(bunch.charge()) * consts.charge_electron
-        distributor = dist_class(self.twiss[0], self.twiss[1], self.twiss[2], **kws)
-        bunch.getSyncParticle().time(0.0)
+
+def gen_bunch_xxp_yyp_twissz(
+    n_parts=0,
+    phase_space_gen_x=None,
+    phase_space_gen_y=None,
+    twiss_z=None,
+    method='cdf',
+    **dist_gen_kws
+):
+    """Generate bunch from f(x, x'), f(y, y'), twiss_z."""
+    comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
+    rank = orbit_mpi.MPI_Comm_rank(comm)
+    size = orbit_mpi.MPI_Comm_size(comm)
+    data_type = mpi_datatype.MPI_DOUBLE
+    main_rank = 0
+    bunch = Bunch()
+    distributor = dist_gen(twiss_z, **dist_gen_kws)
+    bunch.getSyncParticle().time(0.0)
+    if method == "cdf":
         for i in range(n_parts):
-            x, xp, y, yp, z, dE = distributor.getCoordinates()
+            z, dE = distributor.getCoordinates()
+            x, xp = phase_space_gen_x.get_x_xp()
+            y, yp = phase_space_gen_y.get_y_yp()
             x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
-                (x, xp, y, yp, z, dE), 
-                data_type, main_rank, comm,
+                (x, xp, y, yp, z, dE), data_type, main_rank, comm
             )
             if i % size == rank:
                 bunch.addParticle(x, xp, y, yp, z, dE)
-        bunch.macroSize(macrosize / bunch.getSizeGlobal())
-        return bunch
-
-
-class BunchGenerator_XXP_YYP_TwissZ(Base_BunchGenerator):
-    """Generate bunch from {f(x, x'), f(y, y'), twiss_z}."""
-    def __init__(
-        self,
-        phase_space_gen_x,
-        phase_space_gen_y,
-        twiss_z,
-        mass=0.939294,
-        charge=-1,
-        ekin=0.0025,
-        curr=40.0,
-        freq=402.5e6,
-        method="cdf",
-    ):
-        """
-        method = 'cdf' (default): Uses cumulative distribution function
-        to pick coordinates for a randomly generated probability.
-        (aka inverse transform sampling)
-        Gives precise number of particles requested (n_parts)
-
-        method = 'grid': deposits particles on a grid according to
-        probability density function, applies random kernel to 'shake'
-        particles away from grid points.
-        Returns slightly fewer particles than requested ( < n_parts)
-        """
-        self.twiss_z = twiss_z
-        self.phase_space_gen_x = phase_space_gen_x
-        self.phase_space_gen_y = phase_space_gen_y
-        self.method = method
-        super(BunchGeneratorTransverse, self).__init__(
-            mass=mass, charge=charge, ekin=ekin, curr=curr, freq=freq
-        )
-
-    def get_bunch(self, n_parts=0, dist_class=WaterBagDist1D, cut_off=-1.0):
-        comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
-        rank = orbit_mpi.MPI_Comm_rank(comm)
-        size = orbit_mpi.MPI_Comm_size(comm)
-        data_type = mpi_datatype.MPI_DOUBLE
-        main_rank = 0
-        bunch = Bunch()
-        self.bunch.copyEmptyBunchTo(bunch)
-        macrosize = self.current * 1.0e-3 / self.frequency
-        macrosize /= math.fabs(bunch.charge()) * consts.charge_electron
-        # -- distributor for z-distribution
-        distributor = None
-        if dist_class in [WaterBagDist1D, KVDist1D]:
-            distributor = dist_class(self.twiss_z)
-        else:
-            distributor = dist_class(self.twiss_z, cut_off)
-        bunch.getSyncParticle().time(0.0)
-
-        if self.method == "cdf":
-            for i in range(n_parts):
-                (z, dE) = distributor.getCoordinates()
-                (x, xp) = self.phase_space_gen_x.get_x_xp()
-                (y, yp) = self.phase_space_gen_y.get_y_yp()
-                (x, xp, y, yp, z, dE) = orbit_mpi.MPI_Bcast(
-                    (x, xp, y, yp, z, dE), data_type, main_rank, comm
-                )
-                if i % size == rank:
-                    bunch.addParticle(x, xp, y, yp, z, dE)
-        elif self.method == "grid":
-            # Create x and y pdfs.
-            self.phase_space_gen_x.gen_pdf()
-            self.phase_space_gen_y.gen_pdf()
-            # Sample from the pdfs.
-            xcoord, xpcoord = self.phase_space_gen_x.grid_sample(n_parts=n_parts)
-            ycoord, ypcoord = self.phase_space_gen_y.grid_sample(n_parts=n_parts)
-            # Add particles to the bunch. (This is necessary because the
-            # grid method does not return exact n_parts.)
-            n_parts = min(len(xcoord), len(ycoord))
-            for i in range(n_parts):
-                z, dE = distributor.getCoordinates()
-                x, xp = (xcoord[i], xpcoord[i])
-                y, yp = (ycoord[i], ypcoord[i])
-                x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
-                    (x, xp, y, yp, z, dE), 
-                    data_type, 
-                    main_rank, 
-                    comm
-                )
-                if i % size == rank:
-                    bunch.addParticle(x, xp, y, yp, z, dE)
-        else:
-            raise ValueError(
-                "'{}' is not an available method for transverse 2D bunch generation"
-                .format(self.method)
+    elif method == "grid":
+        phase_space_gen_x.gen_pdf()
+        phase_space_gen_y.gen_pdf()
+        xcoord, xpcoord = phase_space_gen_x.grid_sample(n_parts=n_parts)
+        ycoord, ypcoord = phase_space_gen_y.grid_sample(n_parts=n_parts)
+        n_parts = min(len(xcoord), len(ycoord))
+        for i in range(n_parts):
+            z, dE = distributor.getCoordinates()
+            x, xp = (xcoord[i], xpcoord[i])
+            y, yp = (ycoord[i], ypcoord[i])
+            x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
+                (x, xp, y, yp, z, dE), data_type, main_rank, comm
             )
-        n_parts_global = bunch.getSizeGlobal()
-        bunch.macroSize(macrosize / n_parts_global)
-        return bunch
+            if i % size == rank:
+                bunch.addParticle(x, xp, y, yp, z, dE)
+    else:
+        raise ValueError("Invalid method '{}'.".format(method))
+    return bunch
 
 
-class BunchGenerator_XXP_YYP_ZZP(Base_BunchGenerator):
-    """Generate bunch from {f(x, x'), f(y, y'), f(z, dE)}."""
-    def __init__(
-        self,
-        phase_space_gen_x,
-        phase_space_gen_y,
-        phase_space_gen_z,
-        mass=0.939294,
-        charge=-1,
-        ekin=0.0025,
-        curr=40.0,
-        freq=402.5e6,
-        method="cdf",
-    ):
-        """
-        method = 'cdf' (default): Uses the cumulative distribution 
-        function to pick coordinates for a randomly generated probability.
-        (aka inverse transform sampling). This returns the precise number 
-        of requested particles.
-
-        method = 'grid': Deposits particles on a grid according to probability
-        density function, applies random kernel to 'shake' particles away from 
-        grid points. This will return slightly fewer particles than requested.
-        
-        To do: move sampling routines to PhaseSpaceGenerator6D.
-        """
-        self.phase_space_gen_z = phase_space_gen_z
-        self.phase_space_gen_x = phase_space_gen_x
-        self.phase_space_gen_y = phase_space_gen_y
-        self.method = method
-        super(BunchGenerator6D, self).__init__(
-            mass=mass, charge=charge, ekin=ekin, curr=curr, freq=freq
-        )
-
-    def get_bunch(self, n_parts=0, **kwargs):
-        """Returns the pyORBIT bunch with particular number of particles."""
-        comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
-        rank = orbit_mpi.MPI_Comm_rank(comm)
-        size = orbit_mpi.MPI_Comm_size(comm)
-        data_type = mpi_datatype.MPI_DOUBLE
-        main_rank = 0
-        bunch = Bunch()
-        self.bunch.copyEmptyBunchTo(bunch)
-        macrosize = self.current * 1.0e-3 / self.frequency
-        macrosize /= math.fabs(bunch.charge()) * consts.charge_electron
-
-        bunch.getSyncParticle().time(0.0)
-
-        if self.method == "cdf":
-            for i in range(n_parts):
-                z, dE = self.phase_space_gen_z.get_z_zp()
-                x, xp = self.phase_space_gen_x.get_x_xp()
-                y, yp = self.phase_space_gen_y.get_y_yp()
-                x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
-                    (x, xp, y, yp, z, dE), data_type, main_rank, comm
-                )
-                if i % size == rank:
-                    bunch.addParticle(x, xp, y, yp, z, dE)
-        elif self.method == "grid":
-            self.phase_space_gen_z.gen_pdf()
-            self.phase_space_gen_x.gen_pdf()
-            self.phase_space_gen_y.gen_pdf()
-            zcoord, zpcoord = self.phase_space_gen_z.grid_sample(n_parts=n_parts)
-            xcoord, xpcoord = self.phase_space_gen_x.grid_sample(n_parts=n_parts)
-            ycoord, ypcoord = self.phase_space_gen_y.grid_sample(n_parts=n_parts)
-            n_parts = min(len(xcoord), len(ycoord), len(zcoord))  
-            for i in range(n_parts):
-                z, dE = zcoord[i], zpcoord[i]
-                x, xp = xcoord[i], xpcoord[i]
-                y, yp = ycoord[i], ypcoord[i]
-                x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
-                    (x, xp, y, yp, z, dE), data_type, main_rank, comm
-                )
-                if i % size == rank:
-                    bunch.addParticle(x, xp, y, yp, z, dE)
-        else:
-            raise ValueError(
-                "'{}' is not an available method for transverse 2D bunch generation."
-                .format(self.method)
+def gen_bunch_xxp_yyp_zzp(
+    n_parts=0,
+    phase_space_gen_x=None,
+    phase_space_gen_y=None,
+    phase_space_gen_z=None,
+    method='cdf',
+):
+    """Generate bunch from f(x, x'), f(y, y'), f(z, dE)."""
+    comm = orbit_mpi.mpi_comm.MPI_COMM_WORLD
+    rank = orbit_mpi.MPI_Comm_rank(comm)
+    size = orbit_mpi.MPI_Comm_size(comm)
+    data_type = mpi_datatype.MPI_DOUBLE
+    main_rank = 0
+    bunch = Bunch()
+    bunch.getSyncParticle().time(0.0)
+    if self.method == "cdf":
+        for i in range(n_parts):
+            z, dE = phase_space_gen_z.get_z_zp()
+            x, xp = phase_space_gen_x.get_x_xp()
+            y, yp = phase_space_gen_y.get_y_yp()
+            x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
+                (x, xp, y, yp, z, dE), data_type, main_rank, comm
             )
-        bunch.macroSize(macrosize / bunch.getSizeGlobal())
-        return bunch
+            if i % size == rank:
+                bunch.addParticle(x, xp, y, yp, z, dE)
+    elif self.method == "grid":
+        phase_space_gen_z.gen_pdf()
+        phase_space_gen_x.gen_pdf()
+        phase_space_gen_y.gen_pdf()
+        zcoord, zpcoord = phase_space_gen_z.grid_sample(n_parts=n_parts)
+        xcoord, xpcoord = phase_space_gen_x.grid_sample(n_parts=n_parts)
+        ycoord, ypcoord = phase_space_gen_y.grid_sample(n_parts=n_parts)
+        n_parts = min(len(xcoord), len(ycoord), len(zcoord))  
+        for i in range(n_parts):
+            z, dE = zcoord[i], zpcoord[i]
+            x, xp = xcoord[i], xpcoord[i]
+            y, yp = ycoord[i], ypcoord[i]
+            x, xp, y, yp, z, dE = orbit_mpi.MPI_Bcast(
+                (x, xp, y, yp, z, dE), data_type, main_rank, comm
+            )
+            if i % size == rank:
+                bunch.addParticle(x, xp, y, yp, z, dE)
+    else:
+        raise ValueError("Invalid method '{}'.".format(method))
+    return bunch

@@ -2,7 +2,7 @@
 import numpy as np
 
 
-class PhaseSpaceGenerator2D:
+class PhaseSpaceGen2D:
     """Sample from 2D distribution.
 
     The 2D distribution is read from a file with the following format:
@@ -271,7 +271,7 @@ class PhaseSpaceGenerator2D:
         return (x[0, xind], xp[0, xind])
 
 
-class PhaseSpaceGeneratorZPartial:
+class PhaseSpaceGenZPartial:
     """Generates (z, dE) distribution using 1D e-profile.
 
     Assumes Gaussian phase to fit specified emittance and beta function.
@@ -279,14 +279,14 @@ class PhaseSpaceGeneratorZPartial:
     def __init__(
         self, 
         filename, 
-        twissZ, 
+        twiss_z, 
         zdistributor=GaussDist1D, 
         cut_off=-1, 
         threshold=1e-3,
     ):
-        emitZ = twissZ.emittance
-        betaZ = twissZ.beta
-        alphaZ = twissZ.alpha
+        emitZ = twiss_z.emittance
+        betaZ = twiss_z.beta
+        alphaZ = twiss_z.alpha
 
         print("========= Input Twiss ===========")
         print(
@@ -322,14 +322,14 @@ class PhaseSpaceGeneratorZPartial:
             % (alphaZ, betaZ, emitZ * 1.0e6)
         )
 
-        twissZ = TwissContainer(alphaZ, betaZ, emitZ)
+        twiss_z = TwissContainer(alphaZ, betaZ, emitZ)
 
         # -- distributor for 2D Gaussian distribution
         self.distributor = None
         if zdistributor == WaterBagDist1D:
-            self.distributor = zdistributor(twissZ)
+            self.distributor = zdistributor(twiss_z)
         else:
-            self.distributor = zdistributor(twissZ, cut_off)
+            self.distributor = zdistributor(twiss_z, cut_off)
 
     def get_z_zp(self):
         """Sample from z-dE distribution."""

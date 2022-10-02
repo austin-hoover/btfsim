@@ -91,3 +91,24 @@ def ensure_path_exists(path):
 def fit_gauss(x, mu=0.0, *params):
     A, sigma = params
     return A * np.exp(-((x - mu) ** 2) / (2.0 * sigma**2))
+
+
+def lorentz_factors(mass=1.0, kin_energy=1.0):
+    """Return relativistic factors gamma and beta.
+    
+    Parameters
+    ----------
+    mass : float
+        Particle mass divided by c^2 (units of energy).
+    kin_energy : float
+        Particle kinetic energy.
+        
+    Returns
+    -------
+    gamma, beta : float
+        beta = absolute velocity divided by the speed of light
+        gamma = sqrt(1 - (1/beta)**2)
+    """
+    gamma = 1.0 + (kin_energy / mass)
+    beta = np.sqrt(gamma**2 - 1.0) / gamma
+    return gamma, beta

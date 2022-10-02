@@ -30,6 +30,7 @@ from orbit.space_charge.sc3d import setUniformEllipsesSCAccNodes
 import orbit.utils.consts as consts
 
 from btfsim import bunch_utils as bu
+from btfsim import reconstruct as rec
 from btfsim.bunch_utils import BunchCalculator
 from btfsim.lattice import LatticeGenerator
 from btfsim.default import Default
@@ -49,15 +50,17 @@ INIT_TWISS = {
 }
 
 
-class BunchTracker:
-    """Class to store bunch evolution data.
+class Monitor:
+    """Class to record bunch evolution data.
     
     Attributes
     ----------
-    history : DataFrame
-        Stores various scalar beam parameters at each node.
+    history : dict[str: list]
+        Each key is a the name of the parameter; each value is a 
+        list of the parameter's value that is appended to each time
+        the beam is tracked by a lattice node.
     plotter : btfsim.plot.Plotter
-        Plot routine manager. BunchTracker can decide when the plotter
+        Plot routine manager. Monitor can decide when this plotter 
         should activate.
     plot_norm_coords : bool
         Whether to normalize the coordinates by the rms Twiss parameters
@@ -94,20 +97,14 @@ class BunchTracker:
             "r90",
             "r99",
         ]
-        # Add 2D alpha, beta, and emittance keys.
         for dim in ["x", "y", "z"]:
             for name in ["alpha", "beta", "eps"]:
                 keys.append("{}_{}".format(name, dim))
-        # Add covariance matrix element keys (sig_11 = <xx>, sig_12 = <xx'>, etc.).
         for i in range(6):
             for j in range(i + 1):
                 keys.append("sig_{}{}".format(j + 1, i + 1))
         self.history = {key: [] for key in keys}
         
-    def delete_history(self):
-        for key in self.history:
-            self.history[key] = []
-
     def action(self, params_dict):
         node = params_dict["node"]
         bunch = params_dict["bunch"]
@@ -174,22 +171,35 @@ class BunchTracker:
             self.plotter.plot(data=data, info=info, verbose=True)
                                                                     
     def cleanup(self):
-        # Convert history lists to numpy arrays.
+        # Turn history lists into ndarrays.
         for key in self.history:
             self.history[key] = np.array(self.history[key])
-        # Trim zeros from history.
+        # Trim zeros.
         ind = np.where(np.self.history["sig_11"] == 0)[0][1]
         for key, arr in self.history.iteritems():
             istart = 0 if key == "node" else 1
             self.history[key] = arr[istart:ind]
+            
+    def forget(self):
+        """Delete all data."""
+        for key in self.history:
+            self.history[key] = []
 
-    def write_hist(self, filename=None, sep=" "):
+    def write(self, filename=None, sep=" "):
         """Save history data.
 
-        filename = location to save data
+        Parameters
+        ----------
+        filename : str 
+            Path to file.
+        sep : str
+            Delimeter in file (" ", ",", etc.)
+            
+        Returns
+        -------
+        DataFrame
+            Pandas dataframe containing
         """
-        if filename is None:
-            filename = "history.dat"
         keys = list(self.history)
         data = np.array([self.history[key] for key in keys]).T
         df = pd.DataFrame(data=data, columns=keys)
@@ -202,16 +212,6 @@ class Simulation:
 
     Attributes
     ----------
-    kin_energy : float
-        Kinetic energy of synchronous particle [GeV]
-    mass : float
-        Mass per particle [GeV/c^2]        
-    beta : float
-        Synchronous particle velocity relative to speed of light.
-    gamma : float
-        Lorentz factor 1 / sqrt(1 - beta**2)
-    frequency : float
-        Bunch frequency.
     bunch_in : Bunch
         Input bunch to the simulation. It is copied to a `bunch_out`
         for tracking.
@@ -219,45 +219,39 @@ class Simulation:
         Bunch used for tracking; overwritten each time simulation is run.
     lattice : orbit.lattice.AccLattice
         Lattice for tracking.
-    latgen : btfsim.lattice.generate_btf_lattice.LatticeGenerator
-        Instance of lattice generator class.    
+    latgen : btfsim.lattice.LatticeGenerator
+        Instance of LatticeGenerator class.    
+    monitor_kws : Monitor
+        Class which monitors bunch during simulation. The class must implement
+        the method `action(self, params_dict)`, which is called at the entrance
+        of each node in the lattice.
     """
-    def __init__(self, outdir=None, tracker_kws=None):
+    def __init__(self, outdir=None, monitor_kws=None):
         """Constructor.
         
-        tracker_kws : dict
-            Key word arguments passed to BunchTracker.
+        monitor_kws : dict
+            Key word arguments passed to Monitor.
         """
-        self.params = dict()
-        self.params['kin_energy'] = 0.0025  # [GeV]
-        self.params['mass'] = 0.939294  # [GeV/c^2]
-        self.params['charge'] = -1.0  # elementary charge units
-        self.params['gamma'] = (self.params['mass'] + self.params['kin_energy']) / self.params['mass']
-        self.params['beta'] = np.sqrt(self.params['gamma'] * self.params['gamma'] - 1.0) / self.params['gamma']
-        self.params['freq'] = 402.5e6
-
         self.default = Default()
         self.outdir = outdir
         if self.outdir is None:
-            self.outdir = os.path.join(os.getcwd(), '/data')
-        if not os.path.exists(self.outdir):  # -- make directory if not there yet
-            os.mkdir(self.outdir)
-            
+            self.outdir = os.path.join(os.getcwd(), 'data')
+        utils.ensure_path_exists(self.outdir)            
         self.bunch_in = None
         self.bunch_out = None
-        self.tracker_kws = tracker_kws
-        if self.tracker_kws is None:
-            self.tracker_kws = dict()
-                        
+        self.monitor_kws = monitor_kws if monitor_kws else dict()
+        self.monitor = Monitor(**self.monitor_kws)
+        self.action_container = AccActionsContainer('monitor')
+        self.action_container.addAction(self.monitor.action, AccActionsContainer.ENTRANCE)
+      
     def init_all(self, init_bunch=True):
         """Set up full simulation with all default values."""
         self.init_lattice()
         self.init_apertures()
         self.init_sc_nodes()
-        self.tracker = BunchTracker(**self.tracker_kws)
         if init_bunch:
-            self.init_bunch()        
-
+            self.init_bunch()  
+            
     def init_lattice(
         self,
         beamlines=["MEBT1", "MEBT2", "MEBT3"],
@@ -372,240 +366,15 @@ class Simulation:
             aprt_pipe_diameter,
             aprtNodes,
         )
-        ## This will print out the all aperture nodes and their positions
-        # for node in aprtNodes:
-        #     print "aprt=", node.getName()," pos =", node.getPosition()
+        for node in aprtNodes:
+            print("aprt={}", node.getName(), " pos =", node.getPosition())
         self.lattice = self.latgen.lattice
-        print("===== Aperture Nodes Added =======")
+        print("Aperture nodes added.")
 
-    def init_bunch(
-        self, 
-        gen_type='twiss', 
-        dist='waterbag',
-        center=True, 
-        twiss=None,
-        bunch_filename=None,
-        bunch_file_format='pyorbit',
-        n_parts=200000,
-        current=0.040,
-        cut_off=-1,
-        xfilename='',
-        yfilename='',
-        zfilename='',
-        sample_method='cdf',
-        thresh=1e-6,
-    ):
-        """Initialize simulation bunch.
+    def init_bunch(self, bunch):
+        """Set the initial bunch."""
+        self.bunch_in = bunch
 
-        Only sampling of 2 independent phase spaces x-x' and y-y' is implemented. 
-        Default is 200k particles, 40 mA peak, 3D waterbag distribution with 
-        default Twiss parameters.
-        
-        To-do: break down into smaller functions. Should bunch generation be 
-        handled in simulation scripts?
-
-        Parameters
-        ----------
-        gen_type : str
-            Options are {'twiss', 'load', 'twiss', '2d', '2dx3', '2d+E'}.
-            if gen=="twiss", need to define all arguments alpha, beta, etc.
-            or accept the defaults below.
-            if gen=="2d", need to supply arguments:
-                xfile = path to distribution map for x phase space
-                yfile = path to distribution map for y phase space
-                dist is used to determine 2D longitudinal distribution only
-                threshold is fractional threshold for provided emittance data
-            if gen=="2d+E", need to supply arguments:
-                xfile = path to distribution map for x phase space
-                yfile = path to distribution map for y phase space
-                efile = path to measurement of energy profile
-                dist is used to determine 1D phase distribution only
-                threshold is fractional threshold for provided emittance data
-            if gen=="2dx3", need to supply arguments:
-                xfile = path to distribution map for x phase space
-                yfile = path to distribution map for y phase space
-                zfile = path to measurement of energy profile
-                threshold is fractional threshold for emittance data
-            if gen=="load", need to supply arguments:
-                file = path to file containing macro particle distribution
-                fileformat = 'pyorbit' ('parmteq' is also an option)
-        dist : str
-            Distribution name (if generating from Twiss parameters). Options 
-            are {'waterbag', 'kv', 'gaussian'}.
-        threshold : float
-            
-        cutoff : int
-            Cutoff for truncated Gaussian distribution.
-        current :
-            Beam current [A].
-        n_parts : int
-            Number of macro-particles (unused if loading bunch from file).
-        center : bool
-            Whether to center the bunch.
-        twiss : dict
-            Input Twiss parameters normalized RMS value; emit: mm-mrad; beta: mm/mrad.
-        """
-        if gen_type not in ['load', 'twiss', '2d', '2dx3', '2d+E']:
-            raise KeyError(
-                "gen_type={} not valid. allowed generators: ['load', 'twiss', '2d', '2dx3', '2d+E']"
-                .format(gen_type)
-            )
-        # Twiss parameters are not used if generating function does not call for them.
-        if twiss is None:
-            twiss = dict()
-        for key in INIT_TWISS:
-            twiss.setdefault(key, INIT_TWISS[key])
-        alpha_x = twiss['alpha_x']
-        alpha_y = twiss['alpha_y']
-        alpha_z = twiss['alpha_z']
-        beta_x = twiss['beta_x']
-        beta_y = twiss['beta_y']
-        beta_z = twiss['beta_z']
-        eps_x = twiss['eps_x']
-        eps_y = twiss['eps_y']
-        eps_z = twiss['eps_z']
-        twiss_x = TwissContainer(alpha_x, beta_x, eps_x)
-        twiss_y = TwissContainer(alpha_y, beta_y, eps_y)
-        twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
-        
-        # Make emittances un-normalized XAL units [m*rad].
-        eps_x = 1.0e-6 * eps_x / (self.params['gamma'] * self.params['beta'])
-        eps_y = 1.0e-6 * eps_y / (self.params['gamma'] * self.params['beta'])
-        eps_z = 1.0e-6 * eps_z / (self.params['gamma']**3 * self.params['beta'])
-
-        # Transform to pyorbit emittance [GeV*m].
-        eps_z = eps_z * self.params['gamma']**3 * self.params['beta']**2 * self.params['mass']
-        beta_z = beta_z / (self.params['gamma']**3 * self.params['beta']**2 * self.params['mass'])
-        if verbose:
-            if gen_type == "twiss":
-                print("========= PyORBIT Twiss ===========")
-                print('alpha_x = {:6.4f}'.format(alpha_x))
-                print('beta_x = {:6.4f} [mm/mrad]'.format(beta_x))
-                print('eps_x = {:6.4f} [mm*mrad]'.format(1.0e6 * eps_x))
-                print('alpha_y = {:6.4f}'.format(alpha_y))
-                print('beta_y = {:6.4f} [mm/mrad]'.format(beta_y))
-                print('eps_y = {:6.4f} [mm*mrad]'.format(1.0e6 * eps_y))
-            if gen_type in ["twiss", "2d", "2d+E"]:
-                print('alpha_z = {:6.4f}'.format(alpha_z))
-                print('beta_z = {:6.4f} [mm/mrad]'.format(beta_z))
-                print('eps_z = {:6.4f} [mm*MeV]'.format(1.0e6 * eps_z))
-            
-        if gen_type == "load":
-            print("Reading bunch from file {}...".format(bunch_filename))
-            if not os.path.isfile(bunch_filename):
-                raise ValueError("File '{}' does not exist.".format(bunch_filename))
-                
-            bunch_gen = bu.Base_BunchGenerator()
-            if bunch_file_format == "pyorbit":
-                self.bunch_in = Bunch()
-                self.bunch_in.readBunch(bunch_filename)
-            elif bunch_file_format == "parmteq":
-                self.bunch_in = bu.read_parmteq_bunch(bunch_filename)
-            else:
-                raise KeyError("Do not recognize format {} for bunch file".format(bunch_file_format))
-                
-            n_parts = self.bunch_in.getSize()
-            macrosize = self.bunch_in.macroSize()
-            self.bunch_in.getSyncParticle().kinEnergy(self.params['kin_energy'])
-            self.bunch_in.mass(self.params['mass'])
-            self.bunch_in.charge(self.params['charge'])
-            self.z2phase = bunch_gen.get_z_to_phase_coeff()
-            self.current = bunch_gen.get_beam_current() * 1e-3
-
-            # TODO: insert function to extract peak current from coordinates
-            # peak current = N_peak * macroSize * consts.charge_electron * self.params['beta'] * consts.speed_of_light
-            # where N_peak is peak number density
-
-            print("Bunch read complete {} macroparticles.".format(n_parts))
-
-        elif gen_type in ["twiss", "2d", "2d+E", "2dx3"]:
-            self.current = current
-            dist_class = None
-            if dist == "gaussian":
-                if gen_type == "twiss":
-                    dist_class = GaussDist3D
-                elif gen_type in ["2d", "2d+E"]:
-                    dist_class = GaussDist1D
-            elif dist == "waterbag":
-                if gen_type == "twiss":
-                    dist_class = WaterBagDist3D
-                elif gen_type in ["2d", "2d+E"]:
-                    dist_class = WaterBagDist1D
-            elif dist == "kv":
-                if gen_type == "twiss":
-                    dist_class = KVDist3D
-                elif gen_type in ["2d", "2d+E"]:
-                    dist_class = KVDist1D
-            if dist_class is None:
-                raise ValueError("Unrecognized distributor {}.".format(dist))
-            if gen_type == "twiss":
-                bunch_gen = bu.BunchGeneratorTwiss(
-                    twiss_x,
-                    twiss_y,
-                    twiss_z,
-                    mass=self.params['mass'],
-                    charge=self.params['charge'],
-                    kin_energy=self.params['kin_energy'],
-                    curr=self.current * 1e3,
-                    freq=self.params['freq'],
-                )
-            elif gen_type in ["2d", "2d+E", "2dx3"]:
-                phase_sp_gen_x = bu.PhaseSpaceGen(xfilename, threshold=thresh)
-                phase_sp_gen_y = bu.PhaseSpaceGen(yfilename, threshold=thresh)
-                twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
-                if gen_type == "2d":
-                    bunch_gen = bu.BunchGenerator_XXP_YYP_TwissZ(
-                        phase_sp_gen_x,
-                        phase_sp_gen_y,
-                        twiss_z,
-                        mass=self.params['mass'],
-                        charge=self.params['charge'],
-                        kin_energy=self.params['kin_energy'],
-                        curr=self.current * 1e3,
-                        freq=self.params['freq'],
-                        method=sample_method,
-                    )
-                elif gen_type == "2d+E":
-                    efilename = kwargs.get("efile", "")
-                    phase_sp_gen_z = bu.PhaseSpaceGenZPartial(
-                        efilename,
-                        twiss_z,
-                        zdistributor=dist_class,
-                        cut_off=cut_off,
-                    )
-                    bunch_gen = bu.BunchGenerator_XXP_YYP_ZZP(
-                        phase_sp_gen_x,
-                        phase_sp_gen_y,
-                        phase_sp_gen_z,
-                        mass=self.params['mass'],
-                        charge=self.params['charge'],
-                        kin_energy=self.params['kin_energy'],
-                        curr=self.current * 1e3,
-                        freq=self.params['freq'],
-                        method=sample_method,
-                    )
-                elif gen_type == "2dx3":
-                    phase_sp_gen_z = bu.PhaseSpaceGen(zfilename, threshold=thresh)
-                    bunch_gen = bu.BunchGenerator_XXP_YYP_ZZP(
-                        phase_sp_gen_x,
-                        phase_sp_gen_y,
-                        phase_sp_gen_z,
-                        mass=self.params['mass'],
-                        charge=self.params['charge'],
-                        kin_energy=self.params['kin_energy'],
-                        curr=self.current * 1e3,
-                        freq=self.params['freq'],
-                        method=sample_method,
-                    )
-            bunch_gen.set_kin_energy(self.params['kin_energy'])
-            self.bunch_in = bunch_gen.get_bunch(
-                n_parts=int(n_parts), 
-                dist_class=dist_class,
-            )
-            self.z2phase = bunch_gen.get_z_to_phase_coeff()
-            n_parts = self.bunch_in.getSize()
-            print("Bunch generation complete with {} macroparticles.".format(n_parts))
-                    
     def run(self, start=0.0, stop=None, out='default', verbose=0):
         """Run the simulation.
         
@@ -617,7 +386,7 @@ class Simulation:
             Location of output bunch file. If 'default', use 'btf_output_bunch_end.txt'. 
             If None, does not save anything.
         """
-        # Parse default output filename.
+        # Configure output file name.
         if stop == self.lattice.getLength():
             default_output_filename = "btf_output_bunch_end.txt"
         else:
@@ -627,7 +396,7 @@ class Simulation:
         if out is not None:
             output_filename = os.path.join(self.outdir, out)
 
-        # Figure out which nodes are at stop/start position.
+        # Figure out where to start/stop.
         if stop is None:
             stop = self.lattice.getLength()
         if type(start) in [float, int]:
@@ -657,12 +426,10 @@ class Simulation:
                 .format(zs_start_node, ze_stop_node, start_num, stop_num)
             )
             
-        # Add tracking action at each node entrance.
-        self.tracker = BunchTracker(**self.tracker_kws)
-        action_container = AccActionsContainer("bunch tracker")
-        action_container.addAction(self.tracker.action, AccActionsContainer.ENTRANCE)
+        # Add tracking actions; these are called at every node.
+        self.refresh()
 
-        # Run the simulation.
+        # Propagate a copy of the input bunch.
         params_dict = {
             "old_pos": -1.0,
             "count": 0,
@@ -681,21 +448,21 @@ class Simulation:
         
         # Save the last time step.
         params_dict["old_pos"] = -1
-        self.tracker.action(params_dict)
+        self.monitor.action(params_dict)
 
         # Wrap up.
         time_exec = time.clock() - time_start
-        print("time[sec]=", time_exec)
+        print("time = {:.3f} [sec]".format(time_exec))
         if out is not None:
             self.bunch_out.dumpBunch(output_filename)
             print("Dumped output bunch to file {}".format(output_filename))
-        self.tracker.cleanup()
-        self.tracker.history["s"] += zs_start_node
+        self.monitor.cleanup()
+        self.monitor.history["s"] += zs_start_node
 
     def run_reverse(self, start=0.0, stop=None, out='default'):
         """Execute the simulation in reverse.
         
-        The simulation will start at `stop` (position or node) and end at `start`.
+        The simulation will start at `stop` (position or node) and end at `start`.        
         """
         if stop is None:
             stop = self.lattice.getLength()
@@ -748,8 +515,9 @@ class Simulation:
             stop_num = self.lattice.getNodeIndex(stop_node)
             zs_stop_node = stop_node.getPosition() - 0.5 * stop_node.getLength()
             ze_stop_node = stop_node.getPosition() + 0.5 * stop_node.getLength()
-        self.tracker.history["s"] = 2.0 * ze_stop_node - self.tracker.history["s"]
+        self.monitor.history["s"] = 2.0 * ze_stop_node - self.monitor.history["s"]
         
-    def reset(self):
+    def refresh(self):
+        """Prepare for new run."""
         self.bunch_out = None
-        self.tracker.delete_history()
+        self.monitor.forget()
