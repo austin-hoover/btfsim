@@ -1,4 +1,4 @@
-"""Generate samples from 6D distributions."""
+"""Generate samples from phase space measurements."""
 import numpy as np
 
 
@@ -60,11 +60,10 @@ class PhaseSpaceGen2D:
         #       " xp_min=", self.xp_min, " xp_max=", self.xp_max)
         # print("debug xp_step=", self.xp_step, " nx=", self.nx,
         #       " nxp=", self.nxp, " lenMtrY=", len(val_matrix), " lenMtrX=", len(val_matrix[0]))
-        # --------------------------------------------------------------
-        # -- make 2D grid object for PDF
-        self.grid2D = Grid2D(
-            self.nx, self.nxp, self.x_min, self.x_max, self.xp_min, self.xp_max
-        )
+        
+        # Make 2D grid object for PDF
+        self.grid2D = Grid2D(self.nx, self.nxp, self.x_min, 
+                             self.x_max, self.xp_min, self.xp_max)
         self.x_min_gen = self.x_min
         self.xp_min_gen = self.xp_min
         if self.x_min_gen < -math.fabs(x_max):
@@ -77,15 +76,15 @@ class PhaseSpaceGen2D:
             self.x_max_gen = math.fabs(x_max)
         if self.xp_max_gen > -math.fabs(xp_max):
             self.xp_max_gen = math.fabs(xp_max)
-        # --------------------------------------------------------------
-        # -- deposit values in PDF grid
+
+        # Deposit values in PDF grid
         for ix in range(self.nx):
             for ixp in range(self.nxp):
                 val = self.val_matrix[ixp][ix]
                 # -- assign value to 2D grid
                 self.grid2D.setValue(val, ix, ixp)
-        # --------------------------------------------------------------
-        # -- make 2D grid for CDF
+
+        # Make 2D grid for CDF
         self.int_grid2D = Grid2D(
             self.nx, self.nxp, self.x_min, self.x_max, self.xp_min, self.xp_max
         )
@@ -98,9 +97,7 @@ class PhaseSpaceGen2D:
                     + self.grid2D.getValueOnGrid(ix, ixp)
                 ) / 2.0
                 self.int_grid2D.setValue(val + val_0, ix, ixp)
-        self.s_int_arr = [
-            0.0,
-        ]
+        self.s_int_arr = [0.0]
         for ix in range(1, self.nx):
             val_0 = self.s_int_arr[ix - 1]
             val = (
@@ -232,10 +229,6 @@ class PhaseSpaceGen2D:
         self.pdf = self.val_matrix / self.val_matrix.sum()
 
     def grid_sample(self, n_parts=0):
-        # make number density array out of PDF grid
-        # returns arrays of x and x' coordinates
-        #
-
         # -- make number density grid based on PDF
         Ndistr = np.floor(self.pdf * n_parts).astype(int)
         n_parts = Ndistr.sum()
@@ -269,7 +262,7 @@ class PhaseSpaceGen2D:
 
         # -- return shuffled x,x' distribution
         return (x[0, xind], xp[0, xind])
-
+    
 
 class PhaseSpaceGenZPartial:
     """Generates (z, dE) distribution using 1D e-profile.
@@ -284,15 +277,9 @@ class PhaseSpaceGenZPartial:
         cut_off=-1, 
         threshold=1e-3,
     ):
-        emitZ = twiss_z.emittance
-        betaZ = twiss_z.beta
-        alphaZ = twiss_z.alpha
-
-        print("========= Input Twiss ===========")
-        print(
-            "alpha beta emitt[mm*MeV] Z= %6.4f %6.4f %6.4f "
-            % (alphaZ, betaZ, emitZ * 1.0e6)
-        )
+        eps_z = twiss_z.emittance
+        beta_z = twiss_z.beta
+        alpha_z = twiss_z.alpha
 
         ## -- load input dE distribution
         deinput = np.loadtxt(filename)
@@ -302,8 +289,8 @@ class PhaseSpaceGenZPartial:
         pdf = deinput[:, 1]
 
         # -- calculate RMS alpha to preserve emittance and beta
-        self.dErms = np.sqrt(np.sum(pdf * deval**2) / np.sum(pdf))
-        alphaZ = -np.sqrt(betaZ * self.dErms**2 / emitZ - 1)
+        self.dE_rms = np.sqrt(np.sum(pdf * deval**2) / np.sum(pdf))
+        alpha_z = -np.sqrt(beta_z * self.dE_rms**2 / eps_z - 1)
 
         # -- construct cumulative distribution function
         dEstep = (
@@ -316,16 +303,7 @@ class PhaseSpaceGenZPartial:
         # -- function that returns dE [GeV] given index in range [0,1]
         self.invcdf = interp1d(cdf, deval, bounds_error=False, fill_value="extrapolate")
 
-        print("========= Adjusted Twiss ===========")
-        print(
-            "alpha beta emitt[mm*MeV] Z= %6.4f %6.4f %6.4f "
-            % (alphaZ, betaZ, emitZ * 1.0e6)
-        )
-
-        twiss_z = TwissContainer(alphaZ, betaZ, emitZ)
-
-        # -- distributor for 2D Gaussian distribution
-        self.distributor = None
+        twiss_z = TwissContainer(alpha_z, beta_z, eps_z)
         if zdistributor == WaterBagDist1D:
             self.distributor = zdistributor(twiss_z)
         else:
@@ -333,12 +311,7 @@ class PhaseSpaceGenZPartial:
 
     def get_z_zp(self):
         """Sample from z-dE distribution."""
-        (z, dE) = self.distributor.getCoordinates()
-        ind01 = norm.cdf(
-            dE, scale=self.dErms
-        )  # index of particle from [0,1] distribution
-        dE = self.invcdf(ind01)
-        return (z, dE)
+        return self.distributor.getCoordinates()
 
     def gen_pdf(self):
         print("Method 'gen_pdf' not enabled")

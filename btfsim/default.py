@@ -3,7 +3,7 @@ import os
 
 import numpy as np
 
-from btfsim.util import utils
+from btfsim import utils
 
 
 class Default:
@@ -18,7 +18,7 @@ class Default:
 
     def read(self):
         """Read default file defining locations of setpoints/bunches."""
-        simdir = os.path.dirname(os.path.dirname(os.path.dirname(inspect.getfile(utils))))
+        sim_dir = os.getcwd()
         self.defaultdict = utils.file_to_dict(
-            os.path.join(simdir, 'data/default_settings.csv'))
-        self.defaultdict['HOMEDIR'] = simdir
+            os.path.join(sim_dir, 'data/default_settings.csv'))
+        self.defaultdict['HOMEDIR'] = sim_dir

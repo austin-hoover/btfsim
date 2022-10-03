@@ -5,6 +5,7 @@ import os
 import random
 import sys
 
+from psdist import ap
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
@@ -31,16 +32,47 @@ from orbit.bunch_generators import WaterBagDist2D
 from orbit.bunch_generators import WaterBagDist3D
 from orbit.utils import consts
 
-from btfsim import analysis
 
+def initialize_bunch(mass=0.939294, charge=-1, kin_energy=0.0025, current=0.040, freq=402.5e6):
+    """Initialize bunch with specified parameters.
+    
+    Parameters
+    ----------
+    mass : float
+        Particle mass [GeV/c^2].
+    charge : float
+        Particle charge [elementary charge units].
+    kin_energy : float
+        Synchronous particle kinetic energy [GeV].
+    current : float
+        Beam current [A].
+    freq : float
+        RF frequency [Hz].
+        
+    Returns
+    -------
+    Bunch
+    """
+    bunch = Bunch()
+    bunch.mass(mass)
+    bunch.charge(charge)
+    bunch.getSyncParticle().kinEnergy(kin_energy)
+    bunch = set_current(bunch, current=current, freq=freq)
+    return bunch
+    
+    
+def set_current(bunch, current=None, freq=None):
+    """Set macro-size from current [A] and frequency [Hz]."""
+    macro_size = current / freq
+    macro_size = macro_size / (math.fabs(bunch.charge()) * consts.charge_electron)
+    bunch.macroSize(macro_size / bunch.getSizeGlobal())
+    return bunch
 
-default_params = {
-    'mass': 0.939294,  # [GeV/c^2]
-    'charge': -1,  # [elementary charge units]
-    'kin_energy': 0.0025,  # [GeV]
-    'current': 0.040,  # [A] 
-    'freq': 402.5e6,  # [Hz]
-}
+    
+def get_z_to_phase_coeff(bunch, freq=None):
+    """Return coefficient to calculate phase [degrees] from z [m]."""
+    wavelength = consts.speed_of_light / freq
+    return -360.0 / (bunch.getSyncParticle().beta() * wavelength)
 
 
 def get_coord_array(bunch):
@@ -56,7 +88,7 @@ def get_coord_array(bunch):
     return X
 
 
-def decimate(bunch, factor=1):
+def decimate(bunch, factor=1, verbose=0):
     """Reduce the number of macro-particles in the bunch.
 
     This just skips every `fac` indices, so we assume that the bunch
@@ -64,7 +96,9 @@ def decimate(bunch, factor=1):
     """
     n_parts0 = bunch.getSizeGlobal()
     if not factor or not (1 <= factor < n_parts0):
-        print("No decimation for fac={}.".format(factor))
+        print('No decimation for factor={}.'.format(factor))
+    if verbose:
+        print('Decimating bunch by factor {}...'.format(factor))
     new_bunch = Bunch()
     bunch.copyEmptyBunchTo(new_bunch)
     for i in range(0, n_parts0, factor):
@@ -75,6 +109,9 @@ def decimate(bunch, factor=1):
         )
     new_bunch.macroSize(factor * bunch.macroSize())
     new_bunch.copyBunchTo(bunch)
+    if verbose:
+        print('Decimation complete.',
+              'New bunch has {} macro-particles.'.format(new_bunch.getSize()))
     return bunch
 
 
@@ -85,11 +122,14 @@ def attenuate(bunch, factor=1.0):
         The fractional beam current attenuation.
     """
     bunch.macroSize(factor * bunch.macroSize())
+    return bunch
 
     
-def decorrelate_x_y_z(bunch):
+def decorrelate_x_y_z(bunch, verbose=0):
     """Remove cross-plane correlations in the bunch by permuting 
     (x, x'), (y, y'), (z, z') pairs."""
+    if verbose:
+        print("Decorrelating x-x', y-y', z-dE...")
     X = get_coord_array(bunch)
     for i in (0, 2, 4):
         idx = np.random.permutation(np.arange(X.shape[0]))
@@ -101,10 +141,21 @@ def decorrelate_x_y_z(bunch):
         bunch.xp(i, xp)
         bunch.yp(i, yp)
         bunch.dE(i, dE)
-
+    print("Decorrelation complete.")
+    return bunch
         
-def shift(bunch, x, xp, y, yp, z, dE):
-    print('Shifting bunch centroid...')
+    
+def shift(bunch, x, xp, y, yp, z, dE, verbose=0):
+    if verbose:
+        print(
+            "Shifting bunch centroid...",
+            "  delta_x = {:.3f}".format(x),
+            "  delta_x = {:.3f}".format(y),
+            "  delta_z = {:.3f}".format(z),
+            "  delta_xp = {:.3f}".format(xp),
+            "  delta_yp = {:.3f}".format(yp),
+            "  delta_dE = {:.3f}".format(dE),
+        )
     for i in range(bunch.getSize()):
         bunch.x(i, bunch.x(i) + x)
         bunch.y(i, bunch.y(i) + y)  
@@ -112,17 +163,20 @@ def shift(bunch, x, xp, y, yp, z, dE):
         bunch.xp(i, bunch.xp(i) + xp) 
         bunch.yp(i, bunch.yp(i) + yp)
         bunch.dE(i, bunch.dE(i) + dE)
-    print('Bunch shifted.')
+    if verbose:
+        print("Bunch shift complete.")
+    return bunch
 
     
 def center(bunch):
     """Shift the bunch so that first-order moments are zero."""
     twiss = BunchTwissAnalysis()
     twiss.analyzeBunch(bunch)
-    return shift(bunch, *[twiss.getAverage(i) for i in range(6)])
+    deltas = [twiss.getAverage(i) for i in range(6)]
+    return shift(bunch, *deltas)
 
 
-def reverse(bunch):
+def reverse(bunch, verbose=0):
     """Reverse the bunch propagation direction.
 
     Since the tail becomes the head of the bunch, the sign of z
@@ -132,26 +186,13 @@ def reverse(bunch):
         bunch.xp(i, -bunch.xp(i))
         bunch.yp(i, -bunch.yp(i))
         bunch.z(i, -bunch.z(i))
-        
-        
-def set_current(bunch, current=None, freq=None):
-    """Set macro-size from current [A] and frequency [Hz]."""
-    macro_size = current / freq
-    macro_size = macrosize / (math.fabs(bunch.charge()) * consts.charge_electron)
-    bunch.macroSize(macrosize / bunch.getSizeGlobal())
-
-    
-def get_z_to_phase_coeff(bunch, freq=None):
-    """Return coefficient to calculate phase [degrees] from z [m]."""
-    wavelength = consts.speed_of_light / freq
-    return -360.0 / (bunch.getSyncParticle().beta() * wavelength)
-    
+            
     
 def load(
-    self, 
     filename=None,
     file_format='pyorbit',
     verbose=False,
+    bunch=None,
 ):
     """Load bunch from coordinates file.
 
@@ -171,12 +212,15 @@ def load(
                 x(cm)             xpr(=dx/ds)       y(cm)             ypr(=dy/ds)       phi(radian)        W(MeV)
     verbose : bool
         Whether to print intro/exit messages.
+    bunch : Bunch
+        If None, create a new bunch; otherwise, load into this bunch.
     """
     if verbose:
-        print("Reading bunch from file '{}'...".format(bunch_filename))
-    if not os.path.isfile(bunch_filename):
+        print("Reading bunch from file '{}'...".format(filename))
+    if not os.path.isfile(filename):
         raise ValueError("File '{}' does not exist.".format(filename))
-    bunch = Bunch()
+    if bunch is None:
+        bunch = Bunch()
     if file_format == "pyorbit":
         bunch.readBunch(filename)
     elif file_format == "parmteq":
@@ -188,7 +232,7 @@ def load(
         data = np.loadtxt(filename, skiprows=5)
         
         # Trim off-energy particles.
-        kin_energy = np.mean(data[:, 5])  # center energy
+        kin_energy = np.mean(data[:, 5])  # center energy [MeV]
         ind = np.where(np.abs(data[:, 5] - kin_energy) < (0.05 * kin_energy))[0]
         n_parts = len(ind)
         bunch.getSyncParticle().kinEnergy(kin_energy * 1e-3)
@@ -208,7 +252,7 @@ def load(
     else:
         raise KeyError("Unrecognized format '{}'.".format(file_format))
     if verbose:
-        print("Bunch read complete ({} macroparticles).".format(n_parts))
+        print("Bunch loaded ({} macroparticles).".format(bunch.getSize()))
     return bunch
         
 
@@ -246,8 +290,10 @@ class BunchCalculator:
         i = dim
         if type(dim) is str:
             i = ["x", "y", "z"].index(i)
-        alpha, beta = analysis.twiss(self.cov, dim=dim)
-        eps = analysis.emittance(self.cov, dim=dim)
+        j = 2 * i
+        sigma = self.cov[j:j+2, j:j+2]
+        alpha, beta = ap.twiss(sigma)
+        eps = ap.apparent_emittance(sigma)        
         if emit_norm_flag and dim == "z":
             eps *= self.gamma**3 * self.beta
         disp = self.twiss_analysis.getDispersion(i)
@@ -271,13 +317,13 @@ class BunchCalculator:
         Xn = np.zeros(X.shape)
         for i, dim in enumerate(['x', 'y', 'z']):
             twiss = self.twiss(dim=dim)
-            alpha = twiss["alpha"]["value"]
-            beta = twiss["beta"]["value"]
+            alpha = twiss["alpha"]
+            beta = twiss["beta"]
             i *= 2
             Xn[:, i] = X[:, i] / np.sqrt(beta)
             Xn[:, i + 1] = (np.sqrt(beta) * X[:, i + 1]) + (alpha * X[:, i] / np.sqrt(beta))
             if scale_emittance:
-                eps = twiss["eps"]["value"]
+                eps = twiss["eps"]
                 Xn[:, i:i+2] = Xn[:, i:i+2] / np.sqrt(eps)
         return Xn
     

@@ -30,9 +30,9 @@ from orbit.space_charge.sc3d import setUniformEllipsesSCAccNodes
 import orbit.utils.consts as consts
 
 from btfsim import bunch_utils as bu
-from btfsim import reconstruct as rec
+from btfsim import utils
 from btfsim.bunch_utils import BunchCalculator
-from btfsim.lattice import LatticeGenerator
+from btfsim.lattice_utils import LatticeGenerator
 from btfsim.default import Default
 
 
@@ -55,6 +55,8 @@ class Monitor:
     
     Attributes
     ----------
+    start_position : float
+        The start position in the lattice [m].
     history : dict[str: list]
         Each key is a the name of the parameter; each value is a 
         list of the parameter's value that is appended to each time
@@ -73,20 +75,19 @@ class Monitor:
     """
     def __init__(
         self, 
-        save_bunch=None,
+        start_position=0.0,
         plotter=None,
         plot_norm_coords=False,
         plot_scale_emittance=False,
         dispersion_flag=False, 
         emit_norm_flag=False,
     ):
-        self.save_bunch = save_bunch if save_bunch else dict()
+        self.start_position = start_position
         self.plotter = plotter
         self.plot_norm_coords = plot_norm_coords
         self.plot_scale_emittance = plot_scale_emittance
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
-        self.twiss_analysis = BunchTwissAnalysis()
         keys = [
             "s",
             "node",
@@ -94,8 +95,6 @@ class Monitor:
             "n_lost",
             "disp_x",
             "dispp_x",
-            "r90",
-            "r99",
         ]
         for dim in ["x", "y", "z"]:
             for name in ["alpha", "beta", "eps"]:
@@ -108,7 +107,7 @@ class Monitor:
     def action(self, params_dict):
         node = params_dict["node"]
         bunch = params_dict["bunch"]
-        position = params_dict["path_length"]
+        position = params_dict["path_length"] + self.start_position
         if params_dict["old_pos"] == position:
             return
         if params_dict["old_pos"] + params_dict["pos_step"] > position:
@@ -131,11 +130,7 @@ class Monitor:
         n_parts = bunch.getSizeGlobal()
         gamma = bunch.getSyncParticle().gamma()
         beta = bunch.getSyncParticle().beta()
-
-        # Correctly assign the number of particles for the 0th step.
-        if params_dict["count"] == 1:
-            self.history["n_parts"][params_dict["count"] - 1] = n_parts
-
+        
         # Update history.
         self.history["s"].append(position)
         self.history["node"].append(node.getName())
@@ -161,24 +156,24 @@ class Monitor:
         if self.plotter is not None:
             info = dict()
             for key in self.history:
-                info[key] = self.history[key][-1]
+                if self.history[key]:
+                    info[key] = self.history[key][-1]
             info['step'] = params_dict['count']
             info['node'] = params_dict['node'].getName()
             info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
             info['beta'] = params_dict['bunch'].getSyncParticle().beta()  
+            data = calc.coords
             if self.plot_norm_coords:
                 data = calc.norm_coords(scale_emittance=self.plot_scale_emittance)
             self.plotter.plot(data=data, info=info, verbose=True)
                                                                     
     def cleanup(self):
-        # Turn history lists into ndarrays.
-        for key in self.history:
-            self.history[key] = np.array(self.history[key])
         # Trim zeros.
-        ind = np.where(np.self.history["sig_11"] == 0)[0][1]
-        for key, arr in self.history.iteritems():
-            istart = 0 if key == "node" else 1
-            self.history[key] = arr[istart:ind]
+        # ind = np.where(np.array(self.history["sig_11"]) == 0)[0][1]
+        # for key in self.history:
+        #     istart = 0 if key == "node" else 1
+        #     self.history[key] = self.history[key][istart:ind]
+        return
             
     def forget(self):
         """Delete all data."""
@@ -212,19 +207,17 @@ class Simulation:
 
     Attributes
     ----------
-    bunch_in : Bunch
-        Input bunch to the simulation. It is copied to a `bunch_out`
-        for tracking.
-    bunch_out : Bunch
-        Bunch used for tracking; overwritten each time simulation is run.
+    bunch : Bunch
+        The bunch tracked in the simulation. 
+    bunch0 : Bunch
+        Saved copy of the initial bunch.
     lattice : orbit.lattice.AccLattice
         Lattice for tracking.
     latgen : btfsim.lattice.LatticeGenerator
         Instance of LatticeGenerator class.    
     monitor_kws : Monitor
         Class which monitors bunch during simulation. The class must implement
-        the method `action(self, params_dict)`, which is called at the entrance
-        of each node in the lattice.
+        the method `action(self, params_dict)`, which is called at each node.
     """
     def __init__(self, outdir=None, monitor_kws=None):
         """Constructor.
@@ -237,12 +230,11 @@ class Simulation:
         if self.outdir is None:
             self.outdir = os.path.join(os.getcwd(), 'data')
         utils.ensure_path_exists(self.outdir)            
-        self.bunch_in = None
-        self.bunch_out = None
+        self.bunch = self.bunch0 = None
         self.monitor_kws = monitor_kws if monitor_kws else dict()
         self.monitor = Monitor(**self.monitor_kws)
         self.action_container = AccActionsContainer('monitor')
-        self.action_container.addAction(self.monitor.action, AccActionsContainer.ENTRANCE)
+        self.action_container.addAction(self.monitor.action, AccActionsContainer.EXIT)
       
     def init_all(self, init_bunch=True):
         """Set up full simulation with all default values."""
@@ -307,7 +299,7 @@ class Simulation:
         self.lattice = self.latgen.lattice
 
     def init_sc_nodes(self, min_dist=0.015, solver='fft', n_ellipsoid=1, 
-                      gridmult=6, n_bunches=None):
+                      gridmult=6, n_bunches=None, freq=None):
         """Initialize space charge nodes.
 
         min_dist : float
@@ -324,6 +316,8 @@ class Simulation:
             single bunch is modeled using a new Grid3D with periodic boundary
             conditions. If > 0, `n_bunches` are modeled. (Odd numbers round up to 
             even; can only model an even number of neighboring bunches.)
+        freq : float
+            Bunch frequency [Hz].
         """
         print("Initializing space charge nodes...")
         n_ellipsoid = int(n_ellipsoid)
@@ -343,7 +337,7 @@ class Simulation:
             calc = SpaceChargeCalc3D(size_x, size_y, size_z)
             if n_bunches:
                 calc.numExtBunches(n_bunches)
-                calc.freqOfBunches(self.params['freq'])
+                calc.freqOfBunches(freq)
             sc_nodes = setSC3DAccNodes(self.latgen.lattice, min_dist, calc)
         self.lattice = self.latgen.lattice
         self.scnodes = sc_nodes
@@ -372,8 +366,15 @@ class Simulation:
         print("Aperture nodes added.")
 
     def init_bunch(self, bunch):
-        """Set the initial bunch."""
-        self.bunch_in = bunch
+        """Initialize the simulation bunch."""
+        self.bunch = bunch
+        self.bunch0 = Bunch()
+        self.bunch.copyBunchTo(self.bunch0)
+        
+    def reset(self):
+        """Reset the simulation to its initial state."""
+        self.bunch0.copyBunchTo(self.bunch)
+        self.monitor.forget()
 
     def run(self, start=0.0, stop=None, out='default', verbose=0):
         """Run the simulation.
@@ -425,23 +426,20 @@ class Simulation:
                 "Running simulation from s = {:.4f} [m] to s = {:.4f} [m] (nodes {} to {})."
                 .format(zs_start_node, ze_stop_node, start_num, stop_num)
             )
-            
-        # Add tracking actions; these are called at every node.
-        self.refresh()
-
-        # Propagate a copy of the input bunch.
+        
+        # Propagate the bunch.
         params_dict = {
             "old_pos": -1.0,
             "count": 0,
             "pos_step": 0.005,
         } 
         time_start = time.clock()
-        self.bunch_out = Bunch()
-        self.bunch_in.copyBunchTo(self.bunch_out)
+        self.reset()
+        self.monitor.start_position = zs_start_node
         self.lattice.trackBunch(
-            self.bunch_out,
+            self.bunch,
             paramsDict=params_dict,
-            actionContainer=action_container,
+            actionContainer=self.action_container,
             index_start=start_num,
             index_stop=stop_num,
         )
@@ -454,10 +452,9 @@ class Simulation:
         time_exec = time.clock() - time_start
         print("time = {:.3f} [sec]".format(time_exec))
         if out is not None:
-            self.bunch_out.dumpBunch(output_filename)
+            self.bunch.dumpBunch(output_filename)
             print("Dumped output bunch to file {}".format(output_filename))
         self.monitor.cleanup()
-        self.monitor.history["s"] += zs_start_node
 
     def run_reverse(self, start=0.0, stop=None, out='default'):
         """Execute the simulation in reverse.
@@ -489,7 +486,7 @@ class Simulation:
         self.lattice = self.latgen.lattice
 
         # Reverse the bunch coordinates.
-        self.bunch_in = bu.reverse(self.bunch_in)
+        self.bunch = bu.reverse(self.bunch)
 
         # Run in reverse (start <==> stop). Do not auto-save output bunch; the bunch
         # coordinates need to be reversed first.
@@ -505,7 +502,7 @@ class Simulation:
             self.bunch_out.dumpBunch(output_filename)
 
         # Also un-reverse the initial bunch coordinates.
-        self.bunch_in = bu.reverse(self.bunch_in)
+        self.bunch = bu.reverse(self.bunch)
 
         # Wrap up.
         if type(stop) in [float, int]:
@@ -517,7 +514,5 @@ class Simulation:
             ze_stop_node = stop_node.getPosition() + 0.5 * stop_node.getLength()
         self.monitor.history["s"] = 2.0 * ze_stop_node - self.monitor.history["s"]
         
-    def refresh(self):
-        """Prepare for new run."""
-        self.bunch_out = None
-        self.monitor.forget()
+    def write_history(self, filename):
+        self.monitor.write(filename)
