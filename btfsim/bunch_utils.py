@@ -62,10 +62,11 @@ def initialize_bunch(mass=0.939294, charge=-1, kin_energy=0.0025, current=0.040,
     
     
 def set_current(bunch, current=None, freq=None):
-    """Set macro-size from current [A] and frequency [Hz]."""
-    macro_size = current / freq
-    macro_size = macro_size / (math.fabs(bunch.charge()) * consts.charge_electron)
-    bunch.macroSize(macro_size / bunch.getSizeGlobal())
+    """Set macro-size from current [A] and frequency [Hz]."""    
+    charge_bunch = current / freq
+    charge_particle = float(bunch.charge()) * abs(consts.charge_electron)
+    intensity = charge_bunch / charge_particle
+    bunch.macroSize(intensity / bunch.getSizeGlobal())
     return bunch
 
     
