@@ -269,8 +269,8 @@ class BunchCalculator:
     """
     def __init__(self, bunch):
         self.coords = get_coord_array(bunch)
-        self.coords[:, :4] *= 1e3  # mm, mrad, MeV
-        self.coords[:, 5] *= 1e6  # keV
+        self.coords[:, :5] *= 1e3  # x=y=z[mm], x'=y'=[mrad]
+        self.coords[:, 5] *= 1e6  # dE=[keV]
         self.cov = np.cov(self.coords.T)
         self.twiss_analysis = BunchTwissAnalysis()
         self.twiss_analysis.analyzeBunch(bunch)
@@ -306,27 +306,6 @@ class BunchCalculator:
             'disp': disp,
             'dispp': dispp,
         }
-
-    def norm_coords(self, scale_emittance=False):
-        """Return coordinates normalized by rms Twiss parameters.
-        
-        The normalization occurs in x-x', y-y', and z-z'. The parameter
-        `scale_emittance` will additional divide the coordinates by
-        the square root of the rms emittanc.
-        """
-        X = self.coords
-        Xn = np.zeros(X.shape)
-        for i, dim in enumerate(['x', 'y', 'z']):
-            twiss = self.twiss(dim=dim)
-            alpha = twiss["alpha"]
-            beta = twiss["beta"]
-            i *= 2
-            Xn[:, i] = X[:, i] / np.sqrt(beta)
-            Xn[:, i + 1] = (np.sqrt(beta) * X[:, i + 1]) + (alpha * X[:, i] / np.sqrt(beta))
-            if scale_emittance:
-                eps = twiss["eps"]
-                Xn[:, i:i+2] = Xn[:, i:i+2] / np.sqrt(eps)
-        return Xn
     
         
 def gen_bunch_twiss(
