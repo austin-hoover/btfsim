@@ -22,7 +22,7 @@ from btfsim.sim import Simulation
 # Settings
 # ------------------------------------------------------------------------------
 start = 0  # start node (name or index)
-stop = 'QV04'  # stop node (name or index)
+stop = 'HZ04'  # stop node (name or index)
 fio = {'in': {}, 'out': {}}  # to store input/output paths
 
 # Lattice
@@ -33,7 +33,7 @@ mass = 0.939294  # [GeV/c^2]
 charge = -1.0  # [elementary charge units]
 kin_energy = 0.0025  # [GeV[
 freq = 402.5e6  # [Hz]
-beam_current = 0.042  # [A] (if None, use macro-size from input file)
+bunch_current = 0.042  # [A] (if None, do not change)
 bunch_dec_factor = 20  # reduce number of macroparticles by this factor
 fio['in']['bunch'] = 'data/bunch/realisticLEBT_50mA_42mA_8555k.dat'
 
@@ -95,11 +95,13 @@ plot_kws = dict(
     # cmap=plot.truncate_cmap(cm.get_cmap('Greys'), 0.12, 1.0),
 )
 
-dims = ['x', 'xp', 'y', 'yp', 'z', 'zp']
-# maxs = 6 * [5.0]
-maxs = [20.0, 40.0, 20.0, 40.0, 20.0, 100.0]
-_limits = [(-m, m) for m in maxs]
+# Set plot limits.
+_dims = ['x', 'xp', 'y', 'yp', 'z', 'zp']
+# _maxs = 6 * [5.0]
+_maxs = [20.0, 40.0, 20.0, 40.0, 20.0, 100.0]
+_limits = [(-m, m) for m in _maxs]
 
+# Add plot functions.
 for axis in [[(0, 1), (2, 3), (4, 5)], [(0, 2), (4, 0), (4, 2)]]:    
     plotter.add_func(
         plot.proj2d_three_column, 
@@ -113,7 +115,7 @@ for axis in [[(0, 1), (2, 3), (4, 5)], [(0, 2), (4, 0), (4, 2)]]:
         axis=axis, 
         units=False,
         text=True,
-        limits=[(_limits[i], _limits[j]) for (i, j) in axis],
+        # limits=[(_limits[i], _limits[j]) for (i, j) in axis],
         **plot_kws
     )
 
@@ -154,7 +156,7 @@ bunch = bu.load(
 bunch.mass(mass)
 bunch.charge(charge)
 bunch.getSyncParticle().kinEnergy(kin_energy)
-# bunch = bu.set_current(bunch, current=beam_current, freq=freq)
+bunch = bu.set_current(bunch, current=bunch_current, freq=freq)
 bunch = bu.decimate(bunch, bunch_dec_factor, verbose=True,)
 sim.init_bunch(bunch)
 sim.bunch.dumpBunch(os.path.join(outdir, prefix + '-bunch-init.dat'))
