@@ -64,9 +64,10 @@ def initialize_bunch(mass=0.939294, charge=-1, kin_energy=0.0025, current=0.040,
 def set_current(bunch, current=None, freq=None):
     """Set macro-size from current [A] and frequency [Hz]."""    
     charge_bunch = current / freq
-    charge_particle = float(bunch.charge()) * abs(consts.charge_electron)
+    charge_particle = abs(float(bunch.charge()) * consts.charge_electron)
     intensity = charge_bunch / charge_particle
-    bunch.macroSize(intensity / bunch.getSizeGlobal())
+    macro_size = intensity / bunch.getSizeGlobal()
+    bunch.macroSize(macro_size)
     return bunch
 
     
@@ -253,7 +254,7 @@ def load(
     else:
         raise KeyError("Unrecognized format '{}'.".format(file_format))
     if verbose:
-        print("Bunch loaded ({} macroparticles).".format(bunch.getSize()))
+        print("Bunch loaded (nparts={} macrosize={}).".format(bunch.getSize(), bunch.macroSize()))
     return bunch
         
 
