@@ -106,9 +106,9 @@ for axis in [[(0, 1), (2, 3), (4, 5)], [(0, 2), (4, 0), (4, 2)]]:
     plotter.add_func(
         plot.proj2d_three_column, 
         name='{}{}_{}{}_{}{}'.format(
-            dims[axis[0][0]], dims[axis[0][1]],
-            dims[axis[1][0]], dims[axis[1][1]],
-            dims[axis[2][0]], dims[axis[2][1]],
+            _dims[axis[0][0]], _dims[axis[0][1]],
+            _dims[axis[1][0]], _dims[axis[1][1]],
+            _dims[axis[2][0]], _dims[axis[2][1]],
         ),
         fig_kws=dict(figsize=(9.0, 3.0), constrained_layout=True), 
         save_kws=dict(), 
