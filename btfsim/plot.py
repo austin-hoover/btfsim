@@ -151,6 +151,8 @@ def pcolor(
     return ax
 
 
+# The following functions are to be called within the simulation. 
+# -----------------------------------------------------------------------------
 def proj2d(
     data=None, 
     info=None, 
@@ -185,14 +187,66 @@ def proj2d(
             ax.set_title('s = {:.3f} [m]'.format(info['s']))
             
             
+def proj2d_three_column(
+    data=None,
+    info=None,
+    axis=[(0, 1), (2, 3), (4, 5)],
+    bins='auto',
+    limits=None,
+    units=False,
+    fig_kws=None,
+    text=None,
+    **plot_kws
+):
+    """Plot the x-x', y-y', z-dE projections in 1x3 grid.
+    
+    Parameters
+    ----------
+    axis : list[tuple]
+        The indices to plot in each panel. 
+    """
+    inds = axis
+    if limits is None:
+        limits = 3 * [limits]
+    if fig_kws is None:
+        fig_kws = dict()
+    fig, axes = plt.subplots(nrows=1, ncols=3, sharex=False, sharey=False, **fig_kws)
+    labels = True
+    if labels:
+        for ax, (i, j) in zip(axes, inds):
+            if units:
+                ax.set_xlabel("{} [{}]".format(DIMS[i], UNITS[i]))
+                ax.set_ylabel("{} [{}]".format(DIMS[j], UNITS[j]))
+            else:
+                ax.set_xlabel("{}".format(DIMS[i]))
+                ax.set_ylabel("{}".format(DIMS[j]))
+        
+    for ax, ind, lims in zip(axes, inds, limits):
+        edges = histogram_bin_edges(data[:, ind], bins=bins, limits=lims)
+        image, _ = np.histogramdd(data[:, ind], edges)
+        centers = [get_bin_centers(e) for e in edges]  
+        pcolor(image, x=centers[0], y=centers[1], ax=ax, **plot_kws)
+        if text is not None:
+            if 's' in info:
+                ax.set_title('s = {:.3f} [m]'.format(info['s']))
+
+                
 def corner():
     raise NotImplementedError
-    
+        
     
 class Plotter:
-    """Manage chains of plotting functions, arguments, and file saving."""
-    def __init__(self, path='.', default_fig_kws=None, default_save_kws=None,
-                 norm=False, scale_emittance=False):
+    """Manage chains of plotting functions, arguments, and file saving.
+    
+    Attributes
+    ----------
+    transform : callable
+        Function which transforms the Nx6 coordinate array.
+    path : str
+        Directory in which to save the data.
+    """
+    def __init__(self, transform=None, path='.', default_fig_kws=None, default_save_kws=None):
+        self.transform = transform
         self.path = path
         self.default_fig_kws = default_fig_kws
         self.default_save_kws = default_save_kws
@@ -205,22 +259,25 @@ class Plotter:
         self.save_kws = []
         self.plot_kws = []
         self.names = []
-        self.counter = 0
+        self.n_funcs = 0
             
-    def add_func(self, func, fig_kws=None, save_kws=None, name=None, **plot_kws):
+    def add_func(self, func, fig_kws=None, save_kws=None, name=None, **kws):
         self.funcs.append(func)
         self.fig_kws.append(fig_kws if fig_kws else self.default_fig_kws)
         self.save_kws.append(save_kws if save_kws else self.default_save_kws)
-        self.plot_kws.append(plot_kws)
         self.names.append(name if name else 'plot{}'.format(self.counter))
-        self.counter += 1
+        self.plot_kws.append(kws if kws else dict())
+        self.n_funcs += 1
         
     def plot(self, data=None, info=None, verbose=False):
+        if self.transform:
+            data = self.transform(data)
         for i in range(len(self.funcs)):
             filename = self.names[i]
-            for key in ['step', 'node']:
-                if key in info:
-                    filename = filename + '_{}'.format(info[key])
+            if 'step' in info:
+                filename = '{}_{:03}'.format(filename, info['step'])
+            if 'node' in info:
+                filename = '{}_{}'.format(filename, info['node'])
             filename = os.path.join(self.path, filename)
             if verbose:
                 print("Calling plot function '{}' ({}).".format(self.names[i], self.funcs[i].__name__))

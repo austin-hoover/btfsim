@@ -55,21 +55,15 @@ class Monitor:
     
     Attributes
     ----------
-    start_position : float
-        The start position in the lattice [m].
     history : dict[str: list]
         Each key is a the name of the parameter; each value is a 
         list of the parameter's value that is appended to each time
         the beam is tracked by a lattice node.
+    start_position : float
+        The start position in the lattice [m].
     plotter : btfsim.plot.Plotter
         Plot routine manager. Monitor can decide when this plotter 
         should activate.
-    plot_norm_coords : bool
-        Whether to normalize the coordinates by the rms Twiss parameters
-        before plotting.
-    plot_scale_emittance : bool
-        Whether to scale the coordinates by the rms emittances in 
-        each phase plane before plotting.
     emit_norm_flag : bool
     dispersion_flag : bool
     """
@@ -77,15 +71,11 @@ class Monitor:
         self, 
         start_position=0.0,
         plotter=None,
-        plot_norm_coords=False,
-        plot_scale_emittance=False,
         dispersion_flag=False, 
         emit_norm_flag=False,
     ):
         self.start_position = start_position
         self.plotter = plotter
-        self.plot_norm_coords = plot_norm_coords
-        self.plot_scale_emittance = plot_scale_emittance
         self.dispersion_flag = dispersion_flag
         self.emit_norm_flag = emit_norm_flag
         keys = [
@@ -162,19 +152,8 @@ class Monitor:
             info['node'] = params_dict['node'].getName()
             info['gamma'] = params_dict['bunch'].getSyncParticle().gamma()
             info['beta'] = params_dict['bunch'].getSyncParticle().beta()  
-            data = calc.coords
-            if self.plot_norm_coords:
-                data = calc.norm_coords(scale_emittance=self.plot_scale_emittance)
-            self.plotter.plot(data=data, info=info, verbose=True)
-                                                                    
-    def cleanup(self):
-        # Trim zeros.
-        # ind = np.where(np.array(self.history["sig_11"]) == 0)[0][1]
-        # for key in self.history:
-        #     istart = 0 if key == "node" else 1
-        #     self.history[key] = self.history[key][istart:ind]
-        return
-            
+            self.plotter.plot(data=calc.coords, info=info, verbose=True)
+                                                                                
     def forget(self):
         """Delete all data."""
         for key in self.history:
@@ -215,15 +194,12 @@ class Simulation:
         Lattice for tracking.
     latgen : btfsim.lattice.LatticeGenerator
         Instance of LatticeGenerator class.    
-    monitor_kws : Monitor
-        Class which monitors bunch during simulation. The class must implement
-        the method `action(self, params_dict)`, which is called at each node.
     """
     def __init__(self, outdir=None, monitor_kws=None):
         """Constructor.
         
         monitor_kws : dict
-            Key word arguments passed to Monitor.
+            Key word arguments passed to Monitor constructor.
         """
         self.default = Default()
         self.outdir = outdir
@@ -251,7 +227,7 @@ class Simulation:
         mstatename=None,
         mdict=None,
         units="Amps",
-        maxdriftlen=0.012,
+        maxdriftlen=0.010,
         coef_filename=None,
     ):
         """Initialize lattice from xml file.
@@ -428,14 +404,14 @@ class Simulation:
             )
         
         # Propagate the bunch.
-        params_dict = {
-            "old_pos": -1.0,
-            "count": 0,
-            "pos_step": 0.005,
-        } 
-        time_start = time.clock()
         self.reset()
         self.monitor.start_position = zs_start_node
+        params_dict = {
+            'old_pos': -1.0,
+            'count': 0,
+            'pos_step': 0.005,
+        } 
+        time_start = time.clock()
         self.lattice.trackBunch(
             self.bunch,
             paramsDict=params_dict,
@@ -445,16 +421,14 @@ class Simulation:
         )
         
         # Save the last time step.
-        params_dict["old_pos"] = -1
+        params_dict['old_pos'] = -1
         self.monitor.action(params_dict)
-
+        
         # Wrap up.
-        time_exec = time.clock() - time_start
-        print("time = {:.3f} [sec]".format(time_exec))
-        if out is not None:
+        print("time = {:.3f} [sec]".format(time.clock() - time_start))
+        if out:
             self.bunch.dumpBunch(output_filename)
             print("Dumped output bunch to file {}".format(output_filename))
-        self.monitor.cleanup()
 
     def run_reverse(self, start=0.0, stop=None, out='default'):
         """Execute the simulation in reverse.
