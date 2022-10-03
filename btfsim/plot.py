@@ -112,6 +112,7 @@ def pcolor(
     prof_kws=None,
     thresh=None,
     thresh_type="abs",  # {'abs', 'frac'}
+    log=False,
     contour=False,
     contour_kws=None,
     handle_log="floor",
@@ -143,11 +144,14 @@ def pcolor(
         x = x.T
     if y.ndim == 2:
         y = y.T
+    if log:
+        image = prep_image_for_log(image, method=handle_log)
+        plot_kws['norm'] = colors.LogNorm(vmin=np.min(image), vmax=np.max(image))
     mesh = ax.pcolormesh(x, y, image.T, **plot_kws)
     if contour:
         ax.contour(x, y, image.T, **contour_kws)
     profile(image, xcoords=x, ycoords=y, ax=ax, 
-                 profx=profx, profy=profy, **prof_kws)
+            profx=profx, profy=profy, **prof_kws)
     return ax
 
 
