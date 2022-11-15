@@ -5,7 +5,6 @@ import os
 import sys
 
 import numpy as np
-
 from orbit.py_linac.linac_parsers import SNS_LinacLatticeFactory
 from orbit.py_linac.lattice.LinacApertureNodes import LinacApertureNode
 from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import EngeFunction
@@ -14,7 +13,6 @@ from orbit.py_linac.overlapping_fields.overlapping_quad_fields_lib import PMQ_Tr
 from orbit.utils.xml import XmlDataAdaptor
 
 from btfsim import utils
-from btfsim.default import Default
 
 
 def load_quad_setpoint(filename):
@@ -122,12 +120,9 @@ class MagnetConverter(object):
     def __init__(self, coef_filename=None):
         self.coef_filename = coef_filename
         if self.coef_filename is None:
-            default = Default()
-            self.coef_filename = os.path.join(
-                default.defaultdict["HOMEDIR"], default.defaultdict["MAG_COEFF"]
-            )
-        print("coef_filename:", self.coef_filename)
+            self.coef_filename = os.path.join(os.getcwd(), 'data/magnets/default_i2glCoefficients.csv')
         self.coeff = utils.file_to_dict(self.coef_filename)
+        print("coef_filename:", self.coef_filename)
 
     def c2gl(self, quadname, scaledAI):
         """Convert current to gradient.
@@ -239,15 +234,9 @@ class LatticeGenerator(MagnetConverter):
             "VT34b": 0.2,
             "VS06": 0.2,  # larger slit is 0.8 mm
         }
-
-        default = Default()
-        default_lattice_filename = os.path.join(
-            default.defaultdict["HOMEDIR"], default.defaultdict["XML_FILE"]
-        )
-
         self.xml = xml
         if self.xml is None:
-            self.xml = default_lattice_filename
+            self.xml = os.path.join(os.getcwd(), 'data/lattice/btf_lattice_default.xml')
         self.beamlines = beamlines
 
         print("xml file:", self.xml)
@@ -323,14 +312,6 @@ class LatticeGenerator(MagnetConverter):
                 )
             except KeyError:
                 print("Element {} is not defined.".format(element_name))
-
-    def default_quads(self):
-        """Load info stored in default quad settings file."""
-        key = "QUAD_SET"
-        default = Default()
-        filename = os.path.join(default.homedir, default.defaultdict[key])
-        spdict = util.file2dict(filename)
-        self.update_quads(**spdict)
 
     def load_quads(self, filename, units="Tesla"):
         if filename[-6:] == "mstate":

@@ -5,9 +5,9 @@ import os
 import random
 import sys
 
-from psdist import ap
 import numpy as np
 import pandas as pd
+from psdist import ap
 from scipy.stats import norm
 from scipy.interpolate import interp1d
 

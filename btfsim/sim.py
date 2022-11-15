@@ -33,7 +33,6 @@ from btfsim import bunch_utils as bu
 from btfsim import utils
 from btfsim.bunch_utils import BunchCalculator
 from btfsim.lattice_utils import LatticeGenerator
-from btfsim.default import Default
 
 
 # Define default Twiss parameters at RFQ exit.
@@ -201,7 +200,6 @@ class Simulation:
         monitor_kws : dict
             Key word arguments passed to Monitor constructor.
         """
-        self.default = Default()
         self.outdir = outdir
         if self.outdir is None:
             self.outdir = os.path.join(os.getcwd(), 'data')
@@ -211,14 +209,6 @@ class Simulation:
         self.monitor = Monitor(**self.monitor_kws)
         self.action_container = AccActionsContainer('monitor')
         self.action_container.addAction(self.monitor.action, AccActionsContainer.EXIT)
-      
-    def init_all(self, init_bunch=True):
-        """Set up full simulation with all default values."""
-        self.init_lattice()
-        self.init_apertures()
-        self.init_sc_nodes()
-        if init_bunch:
-            self.init_bunch()  
             
     def init_lattice(
         self,
@@ -249,7 +239,7 @@ class Simulation:
             File name for magnet coefficients.
         """
         if xml is None:  
-            xml = os.path.join(self.default.home, self.default.defaultdict["XML_FILE"])
+            xml = os.path.join(os.getcwd(), 'data/lattice/btf_lattice_default.xml')
         print('xml:', xml)
         
         self.latgen = LatticeGenerator(
@@ -352,27 +342,14 @@ class Simulation:
         self.bunch0.copyBunchTo(self.bunch)
         self.monitor.forget()
 
-    def run(self, start=0.0, stop=None, out='default', verbose=0):
+    def run(self, start=0.0, stop=None, verbose=0):
         """Run the simulation.
         
         Parameters
         ----------
         start/stop : float or str
             Start/stop position or node name.
-        out : str
-            Location of output bunch file. If 'default', use 'btf_output_bunch_end.txt'. 
-            If None, does not save anything.
-        """
-        # Configure output file name.
-        if stop == self.lattice.getLength():
-            default_output_filename = "btf_output_bunch_end.txt"
-        else:
-            default_output_filename = "btf_output_bunch_{}.txt".format(stop)
-        if out == 'default':
-            out = default_output_filename
-        if out is not None:
-            output_filename = os.path.join(self.outdir, out)
-
+        """       
         # Figure out where to start/stop.
         if stop is None:
             stop = self.lattice.getLength()
@@ -426,9 +403,6 @@ class Simulation:
         
         # Wrap up.
         print("time = {:.3f} [sec]".format(time.clock() - time_start))
-        if out:
-            self.bunch.dumpBunch(output_filename)
-            print("Dumped output bunch to file {}".format(output_filename))
 
     def run_reverse(self, start=0.0, stop=None, out='default'):
         """Execute the simulation in reverse.
